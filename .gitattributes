@@ -1,0 +1,13 @@
+# Disable ALL end-of-line conversion.
+#
+# The manifest stores a SHA-256 of each CSV's exact bytes. A clone with
+# core.autocrlf=true (the Windows default) rewrites LF to CRLF on checkout,
+# which changes every byte, breaks every checksum, and makes mirror_fred.py
+# --verify-all fail and --restore-all refuse. Verified 2026-08-03: converting
+# NFCI.csv to CRLF produced "sha256 mismatch" and blocked the restore.
+#
+# The failure is fail-closed, so it cannot corrupt an archive -- but it would
+# block recovery at exactly the moment recovery is needed.
+* -text
+*.csv -text
+*.json -text
