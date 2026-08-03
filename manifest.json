@@ -1,0 +1,46 @@
+{
+  "schema": 1,
+  "series": {
+    "BAMLC0A0CM": {
+      "sha256": "46146b7edde385aff87fdffc5a79427f475a660ca2b1043320e0ae5884732ab3",
+      "obs_count": 786,
+      "first_date": "2023-08-01",
+      "last_date": "2026-07-30",
+      "bytes": 12494,
+      "exported_at": "2026-08-03T14:46:53.264088Z"
+    },
+    "BAMLH0A0HYM2": {
+      "sha256": "153715f77134ea78a322954e36a4975a4100d71db14b44f8f63dcbdf8dfaf7a7",
+      "obs_count": 787,
+      "first_date": "2023-08-01",
+      "last_date": "2026-07-30",
+      "bytes": 12529,
+      "exported_at": "2026-08-03T14:46:53.260573Z"
+    },
+    "DGS10": {
+      "sha256": "98842321cfbd6a74b68488d6fa3717e2573aef357ffe2d8c5014a771618d7aea",
+      "obs_count": 16129,
+      "first_date": "1962-01-02",
+      "last_date": "2026-07-30",
+      "bytes": 257509,
+      "exported_at": "2026-08-03T14:46:53.248867Z"
+    },
+    "DGS2": {
+      "sha256": "8dbfd7637e28d621da7b362c1438a5eab59f3567dc7a030a0330a200bee2f0bc",
+      "obs_count": 12537,
+      "first_date": "1976-06-01",
+      "last_date": "2026-07-30",
+      "bytes": 200304,
+      "exported_at": "2026-08-03T14:46:53.218769Z"
+    },
+    "NFCI": {
+      "sha256": "5fb9e66bdb9b3b3835080867c6ab0ff2a448bea9e60d58172b02ff1121478d3c",
+      "obs_count": 2899,
+      "first_date": "1971-01-08",
+      "last_date": "2026-07-24",
+      "bytes": 51044,
+      "exported_at": "2026-08-03T14:46:53.256807Z"
+    }
+  },
+  "updated_at": "2026-08-03T14:46:53.264110Z"
+}
