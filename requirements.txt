@@ -1,0 +1,7 @@
+# Runtime for the backtesting toolkit. The archive itself needs none of this.
+numpy>=1.26
+pandas>=2.0
+requests>=2.31   # only for `ingest`; everything else runs offline
+
+# Development
+pytest>=8.0
