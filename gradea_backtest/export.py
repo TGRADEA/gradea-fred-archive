@@ -26,6 +26,7 @@ from .ingest import RECOMMENDED
 from .metrics import compute_metrics
 from .regimes import FAMILY_DESCRIPTIONS, LABEL_ORDER, build_regimes
 from .returns import ASSET_LABELS, build_asset_returns
+from .significance import assess, expected_maximum_sharpe
 from .strategies import available_strategies
 
 #: One in five trading days -- a weekly grid that keeps every chart under a few
@@ -83,19 +84,32 @@ def build_payload(
     dates = [d.date().isoformat() for d in grid]
 
     # ---- strategies -------------------------------------------------------
+    # Two passes: every strategy has to be run before any of them can be
+    # assessed, because the significance of one depends on how many were tried.
+    specs = available_strategies(panel.pit)
     results: list[BacktestResult] = []
-    strategy_payload = []
-    for spec in available_strategies(panel.pit):
-        weights = spec.build(panel.pit, regimes, **spec.defaults())
-        result = run_backtest(
-            spec.key,
-            weights,
-            asset_returns,
-            regimes,
-            description=spec.description,
-            risk_free=risk_free,
+    for spec in specs:
+        results.append(
+            run_backtest(
+                spec.key,
+                spec.build(panel.pit, regimes, **spec.defaults()),
+                asset_returns,
+                regimes,
+                description=spec.description,
+                risk_free=risk_free,
+            )
         )
-        results.append(result)
+
+    # Baselines are benchmarks, not trials -- see significance.assess.
+    searched = [
+        r.metrics.sharpe for spec, r in zip(specs, results) if spec.family != "Baseline"
+    ]
+    expected_max = expected_maximum_sharpe(searched)
+
+    strategy_payload = []
+    for spec, result in zip(specs, results):
+
+        sig = assess(result.net_returns, searched, n_boot=1500)
 
         attribution = {}
         for family, table in result.attribution.items():
@@ -144,6 +158,11 @@ def build_payload(
                 "assets": result.assets,
                 "params": [asdict(p) for p in spec.params],
                 "metrics": _metrics_payload(result.metrics),
+                "significance": {
+                    k: (v if isinstance(v, (str, int)) else _round(v, 5))
+                    for k, v in sig.to_dict().items()
+                },
+                "is_baseline": spec.family == "Baseline",
                 "gross_cagr": _round(result.gross_metrics.cagr, 6),
                 "equity": _series_on(grid, result.equity, 5),
                 "drawdown": _series_on(grid, result.drawdown, 5),
@@ -209,6 +228,11 @@ def build_payload(
 
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "search": {
+            "n_searched": len(searched),
+            "n_baselines": len(specs) - len(searched),
+            "expected_max_sharpe": _round(expected_max, 4),
+        },
         "sample_stride": SAMPLE_STRIDE,
         "dates": dates,
         "coverage": coverage,
@@ -236,6 +260,12 @@ def build_payload(
             "Signals are lagged by each series' publication delay and then held one "
             "further day before trading. NFCI carries a four-business-day lag.",
             "All percentile and z-score thresholds are expanding, never full-sample.",
+            "Sharpe ratios are deflated for multiple testing. Searching several "
+            "strategies means the best one is drawn from a maximum, not a single "
+            "draw, and under a null where none of them work that maximum is "
+            "comfortably positive. The deflated Sharpe is the probability the "
+            "strategy beats that null's expected best; below ~0.95 the result is "
+            "not distinguishable from a lucky search.",
         ],
     }
 

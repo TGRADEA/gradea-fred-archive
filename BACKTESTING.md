@@ -61,6 +61,63 @@ assuming them. The two that matter most:
   which inverts the sign of the trade's carry and turns a hard trade into a free
   one.
 
+## Ported from QuantGuild
+
+Two modules come from Roman Paolucci's QuantGuild material
+(github.com/romanmichaelpaolucci). That corpus is options- and equity-focused
+teaching code — Black-Scholes, Greeks, stochastic processes, portfolio
+construction — and most of it has no counterpart in a rates-and-credit panel
+built on five FRED series. Two things did, and both closed a real gap here.
+
+### `markov.py` — learned volatility regimes
+
+A port of the `MarkovRegime` class from the "Markov Chain Regime Switching Bot"
+lectures: three hidden states, Gaussian emissions, a sticky transition matrix,
+and Bayesian forward filtering. It is the only regime family in this package
+that is *learned* rather than declared — every other one encodes a threshold
+someone chose.
+
+Three adaptations were needed:
+
+| | Original | Here | Why |
+|---|---|---|---|
+| Observation | intraday `(high-low)/close` from IB bars | absolute daily change in the 10y yield | the archive is daily |
+| Calibration | once, on a block of history | refit every 252 days on expanding history | fitting once over a backtest sample puts 2008's volatility into 1985's labels |
+| Inference | forward filter | forward filter, unchanged | Baum-Welch or Viterbi over the whole series would label beautifully and be untradeable |
+
+The second is the load-bearing one. The original calibrates once and then runs
+live, which is correct for a live bot — everything it was fitted on really is in
+its past. The same code pointed at history is a lookahead.
+
+The learned states separate cleanly: mean daily 10y moves of 1.4bp, 2.6bp and
+7.8bp, and the filter independently flags March 1980, October 2008, March 2020
+and September 2022 as high-volatility without being told those dates matter.
+
+### `significance.py` — is it skill, or the best of eleven coin flips?
+
+The QuantGuild corpus returns to this question in a dozen lectures. It was also
+the largest hole here: this package reported a Sharpe ratio for each strategy and
+let the reader assume the best one meant something.
+
+It mostly does not. Deflating for multiple testing (Bailey & López de Prado)
+against the nine genuinely searched strategies, the null's expected best Sharpe
+is **0.45** — and only `nfci_duration`, at 0.65 with a deflated Sharpe of 0.93,
+comes close to clearing it. Everything else is indistinguishable from a lucky
+search.
+
+Implemented: Probabilistic and Deflated Sharpe ratios, minimum track record
+length, and a stationary block bootstrap (Politis & Romano) whose resamples keep
+the autocorrelation of daily returns intact. PSR is verified calibrated against a
+true null — uniform on [0,1], 4.3% false positives at the 95% threshold.
+
+One methodological choice worth stating: **benchmarks are excluded from the trial
+count.** Nobody searched for "own the 2-year note"; it is what the search is
+measured against. Including the baselines moves the null's expected best from
+0.45 to 1.09, because deflation scales with the spread of trial Sharpes and an
+unlevered 2y position scoring 2.2 against a zero cash rate widens that spread
+enormously. That would bury every real result under an artefact of how the
+benchmark is financed.
+
 ## Known limitations
 
 These are stated on the dashboard too, because they change how the numbers should
@@ -78,6 +135,10 @@ be read:
    dashboard's parameter ranges exist to show how flat or sharp a strategy's
    response is, not to help you find the peak — each sweep spends some of the
    sample's ability to tell you anything.
+5. **The deflation counts strategies, not parameter settings.** Sweeping a
+   strategy's parameters and keeping the best is a second search that the
+   deflated Sharpe here does not see, and it will overstate significance if you
+   do it. Treat the parameter controls as diagnostics, not as an optimiser.
 
 ## Extending the panel
 
@@ -106,6 +167,8 @@ gradea_backtest/
   strategies.py  strategy registry
   engine.py      execution, costs, attribution
   metrics.py     performance statistics
+  markov.py      learned volatility regimes (ported, see above)
+  significance.py  deflated Sharpe, PSR, block bootstrap
   ingest.py      FRED fetcher (writes only to data/extended/)
   export.py      payload for the dashboard
   cli.py         command line

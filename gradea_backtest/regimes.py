@@ -38,6 +38,7 @@ LABEL_ORDER: dict[str, list[str]] = {
     "rate_trend": ["Falling yields", "Rising yields"],
     "credit_stress": ["Calm", "Normal", "Stress"],
     "macro_state": ["Risk-on", "Neutral", "Risk-off"],
+    "markov_vol": ["Low vol", "Medium vol", "High vol"],
 }
 
 #: What each family is actually asking about, surfaced in the dashboard so a
@@ -74,6 +75,13 @@ FAMILY_DESCRIPTIONS: dict[str, str] = {
     "macro_state": (
         "Composite of financial conditions, curve dynamics and credit. A coarse "
         "risk-on / risk-off read intended as a conditioning lens, not a signal."
+    ),
+    "markov_vol": (
+        "The only regime here that is learned rather than declared. A three-state "
+        "Markov-switching filter estimates where the volatility regimes actually "
+        "sit and carries a probability across them, refitting on expanding "
+        "history so a 1985 label never depends on 2008. Ported from QuantGuild's "
+        "regime-switching lectures; see gradea_backtest/markov.py."
     ),
 }
 
@@ -231,6 +239,15 @@ def macro_state_regime(pit: pd.DataFrame) -> pd.Series:
     return out.rename("macro_state")
 
 
+def _markov_vol_regime(pit: pd.DataFrame) -> pd.Series:
+    """Learned volatility regime. Imported lazily -- it is the one classifier
+    here that costs real time to compute, and the cheap rule-based families
+    should not pay for it."""
+    from .markov import markov_vol_regime
+
+    return markov_vol_regime(pit)
+
+
 #: Registry consumed by the engine, the CLI and the dashboard export.
 REGIME_BUILDERS = {
     "curve_slope": curve_slope_regime,
@@ -240,6 +257,7 @@ REGIME_BUILDERS = {
     "rate_trend": rate_trend_regime,
     "credit_stress": credit_stress_regime,
     "macro_state": macro_state_regime,
+    "markov_vol": _markov_vol_regime,
 }
 
 

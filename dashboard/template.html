@@ -155,6 +155,19 @@ td.num,th.num{font-family:"IBM Plex Mono",Menlo,monospace; font-variant-numeric:
   display:inline-block; font-size:11px; padding:1px 7px; border-radius:20px;
   border:1px solid var(--line-strong); color:var(--ink-2); background:var(--surface-2);
 }
+.verdict{
+  display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:500;
+  padding:3px 10px; border-radius:20px; border:1px solid; white-space:nowrap;
+}
+.verdict .dot{width:7px; height:7px; border-radius:50%; flex:none}
+.v-strong{color:var(--pos); border-color:var(--pos); background:var(--accent-soft)}
+.v-strong .dot{background:var(--pos)}
+.v-mid{color:var(--warn-ink); border-color:var(--warn-line); background:var(--warn-bg)}
+.v-mid .dot{background:var(--s4)}
+.v-weak{color:var(--ink-3); border-color:var(--line-strong); background:var(--surface-2)}
+.v-weak .dot{background:var(--ink-3)}
+.sig-grid{display:grid; gap:10px; grid-template-columns:repeat(auto-fit,minmax(128px,1fr)); margin:14px 0 4px}
+.sig-grid .tile{background:var(--surface-2)}
 .bar-cell{position:relative; min-width:90px}
 .bar-cell .bg{position:absolute; inset:2px auto 2px 0; border-radius:3px; opacity:.20}
 
@@ -264,6 +277,23 @@ td.num,th.num{font-family:"IBM Plex Mono",Menlo,monospace; font-variant-numeric:
       <span class="hint">net return per year</span>
     </div>
     <div class="chart" id="yr-chart"><div class="tip" id="yr-tip"></div></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Luck or skill</h2>
+      <span class="hint" id="sig-hint"></span>
+    </div>
+    <p class="lede">Search enough strategies and the best one looks good by
+      construction. The dashed line is the Sharpe ratio the <em>best of this
+      search</em> would be expected to reach if none of these strategies worked at
+      all; bars are 90% bootstrap intervals that keep the autocorrelation of daily
+      returns intact. A strategy whose interval straddles that line has not said
+      anything yet.</p>
+    <div id="sig-verdict" style="margin-bottom:6px"></div>
+    <div class="sig-grid" id="sig-tiles"></div>
+    <div class="legend" id="sig-legend"></div>
+    <div class="chart" id="sig-chart"><div class="tip" id="sig-tip"></div></div>
   </section>
 
   <section class="panel">
@@ -607,6 +637,109 @@ function yearChart(host,tip,rows){
   svg.addEventListener("pointerleave",()=>tip.style.opacity=0);
 }
 
+/* ---------- interval chart: Sharpe with bootstrap CI ---------- */
+function intervalChart(host,tip,rows,refLine){
+  const W=900, rowH=26, H=rows.length*rowH+40, L=190, R=64;
+  const iw=W-L-R;
+  const svg=svgRoot(host,W,H);
+  const lo=Math.min(0,...rows.map(r=>r.lo).filter(isFinite));
+  const hi=Math.max(...rows.map(r=>r.hi).filter(isFinite), refLine);
+  const span=(hi-lo)||1, X=(v)=> L+(v-lo)/span*iw;
+
+  niceTicks(lo,hi,5).forEach(v=>{
+    const x=X(v);
+    el("line",{x1:x,x2:x,y1:22,y2:H-14,stroke:css("--grid"),"stroke-width":1},svg);
+    const t=el("text",{x,y:16,"text-anchor":"middle","font-size":10.5,fill:css("--ink-3")},svg);
+    t.setAttribute("font-family",'"IBM Plex Mono",monospace'); t.textContent=v.toFixed(1);
+  });
+  // zero, then the null's expected best
+  el("line",{x1:X(0),x2:X(0),y1:22,y2:H-14,stroke:css("--line-strong"),"stroke-width":1},svg);
+  if(isFinite(refLine)){
+    el("line",{x1:X(refLine),x2:X(refLine),y1:22,y2:H-14,stroke:css("--s2"),
+               "stroke-width":1.6,"stroke-dasharray":"5 4"},svg);
+    const t=el("text",{x:X(refLine),y:H-3,"text-anchor":"middle","font-size":10.5,fill:css("--s2")},svg);
+    t.setAttribute("font-family",'"IBM Plex Mono",monospace');
+    t.textContent="null's best "+refLine.toFixed(2);
+  }
+
+  rows.forEach((r,i)=>{
+    const y=34+i*rowH;
+    const col = r.baseline? css("--ink-3") : (r.dsr>=0.95? css("--pos") : r.dsr>=0.90? css("--s4") : css("--ink-3"));
+    if(isFinite(r.lo)&&isFinite(r.hi)){
+      el("line",{x1:X(r.lo),x2:X(r.hi),y1:y,y2:y,stroke:col,"stroke-width":2,
+                 "stroke-linecap":"round",opacity:.5},svg);
+      [r.lo,r.hi].forEach(v=>el("line",{x1:X(v),x2:X(v),y1:y-4,y2:y+4,stroke:col,"stroke-width":2},svg));
+    }
+    // Hollow marker for a benchmark, filled for a searched strategy: they are
+    // not the same kind of claim and should not look alike.
+    el("circle",{cx:X(r.sharpe),cy:y,r:5,
+      fill: r.baseline? css("--surface") : col,
+      stroke:col,"stroke-width":2},svg);
+
+    const lab=el("text",{x:L-14,y:y+4,"text-anchor":"end","font-size":11.5,
+      fill: r.key===state.strategy? css("--ink") : css("--ink-2"),
+      "font-weight": r.key===state.strategy? "600":"400"},svg);
+    lab.textContent=r.name.length>30? r.name.slice(0,29)+"\u2026" : r.name;
+
+    const val=el("text",{x:W-R+10,y:y+4,"font-size":11,fill:css("--ink-2")},svg);
+    val.setAttribute("font-family",'"IBM Plex Mono",monospace');
+    val.textContent=r.sharpe.toFixed(2);
+
+    const hit=el("rect",{x:L-160,y:y-rowH/2,width:W-L+160-8,height:rowH,fill:"transparent",
+                         style:"cursor:pointer"},svg);
+    hit.addEventListener("pointerenter",()=>{
+      tip.innerHTML=`<div class="tdate">${r.name}${r.baseline?" (benchmark, not a trial)":""}</div>
+        <div class="trow"><span>Sharpe</span><b class="num">${r.sharpe.toFixed(2)}</b></div>
+        <div class="trow"><span>90% interval</span><b class="num">${isFinite(r.lo)?r.lo.toFixed(2)+" to "+r.hi.toFixed(2):"&mdash;"}</b></div>
+        <div class="trow"><span>deflated Sharpe</span><b class="num">${isFinite(r.dsr)?r.dsr.toFixed(3):"&mdash;"}</b></div>
+        <div class="trow"><span>skew / kurtosis</span><b class="num">${r.skew.toFixed(2)} / ${r.kurt.toFixed(1)}</b></div>
+        <div style="margin-top:6px;color:var(--ink-3);max-width:210px">${r.verdict}</div>`;
+      tip.style.opacity=1;
+      const hostR=host.getBoundingClientRect();
+      tip.style.left=Math.min((L/W)*hostR.width, hostR.width-tip.offsetWidth-4)+"px";
+      tip.style.top=((y/H)*hostR.height-10)+"px";
+    });
+    hit.addEventListener("click",()=>{ state.strategy=r.key; $("sel-strategy").value=r.key; render(); });
+  });
+  svg.addEventListener("pointerleave",()=>tip.style.opacity=0);
+}
+
+function verdictClass(d){ return d>=0.95?"v-strong": d>=0.90?"v-mid":"v-weak"; }
+
+function renderSignificance(){
+  const s=STRATS[state.strategy], g=s.significance||{};
+  const ref=D.search? D.search.expected_max_sharpe : NaN;
+  $("sig-hint").textContent=D.search
+    ? `${D.search.n_searched} strategies searched, ${D.search.n_baselines} benchmarks excluded`
+    : "";
+  $("sig-verdict").innerHTML=
+    `<span class="verdict ${verdictClass(g.deflated_sharpe)}"><span class="dot"></span>${s.name}: ${g.verdict||"&mdash;"}</span>`;
+
+  const mtrl=g.min_track_record_years;
+  $("sig-tiles").innerHTML=[
+    ["Deflated Sharpe", g.deflated_sharpe==null?"&mdash;":g.deflated_sharpe.toFixed(3), "vs the null&rsquo;s best"],
+    ["Prob. Sharpe &gt; 0", g.psr==null?"&mdash;":g.psr.toFixed(3), "before deflation"],
+    ["90% interval", (g.bootstrap_lo==null?"&mdash;":g.bootstrap_lo.toFixed(2)+" to "+g.bootstrap_hi.toFixed(2)), "block bootstrap"],
+    ["Skew / kurtosis", (g.skew==null?"&mdash;":g.skew.toFixed(2)+" / "+g.kurtosis.toFixed(1)), "3.0 = normal"],
+    ["Track record needed", (mtrl==null||!isFinite(mtrl))?"&mdash;":mtrl.toFixed(1)+" yr",
+      (mtrl!=null&&isFinite(mtrl)&&g.n_days!=null&&mtrl>g.n_days/252)?"longer than the sample":"within the sample"]
+  ].map(([k,v,sub])=>`<div class="tile"><div class="k">${k}</div><div class="v num" style="font-size:19px">${v}</div><div class="sub">${sub}</div></div>`).join("");
+
+  $("sig-legend").innerHTML=
+    `<span><i style="background:${css("--pos")}"></i>survives deflation</span>`+
+    `<span><i style="background:${css("--s4")}"></i>suggestive</span>`+
+    `<span><i style="background:${css("--ink-3")}"></i>not distinguishable</span>`+
+    `<span><i style="background:${css("--surface")};border:2px solid ${css("--ink-3")}"></i>benchmark, not a trial</span>`;
+
+  const rows=D.strategies.map(x=>{
+    const q=x.significance||{};
+    return {key:x.key,name:x.name,baseline:!!x.is_baseline,
+      sharpe:q.sharpe_ann??0, lo:q.bootstrap_lo??NaN, hi:q.bootstrap_hi??NaN,
+      dsr:q.deflated_sharpe??NaN, skew:q.skew??0, kurt:q.kurtosis??0, verdict:q.verdict||""};
+  }).filter(r=>isFinite(r.sharpe)).sort((a,b)=>b.sharpe-a.sharpe);
+  intervalChart($("sig-chart"),$("sig-tip"),rows,ref);
+}
+
 /* ---------- tables ---------- */
 function attrTable(rows){
   const t=$("attr-table");
@@ -714,6 +847,7 @@ function render(){
   attrTable(rows);
 
   yearChart($("yr-chart"),$("yr-tip"),s.by_year||[]);
+  renderSignificance();
   cmpTable();
 }
 

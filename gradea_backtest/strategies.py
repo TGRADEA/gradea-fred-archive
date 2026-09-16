@@ -390,6 +390,50 @@ register(Strategy(
 ))
 
 
+def _markov_risk_budget(pit, regimes, low=1.0, medium=0.6, high=0.2, **_):
+    """Scale duration exposure down as the learned volatility regime escalates."""
+    state = regimes.get("markov_vol")
+    idx = pit.index
+    if state is None:
+        return _frame(idx, UST10Y=pd.Series(0.0, index=idx))
+    weight = pd.Series(np.nan, index=idx)
+    weight[state == "Low vol"] = float(low)
+    weight[state == "Medium vol"] = float(medium)
+    weight[state == "High vol"] = float(high)
+    return _frame(idx, UST10Y=weight.where(state.notna()))
+
+
+register(Strategy(
+    key="markov_risk_budget",
+    name="Markov volatility risk budget",
+    family="Regime",
+    description=(
+        "Hold the 10-year, sized by the learned volatility regime: full size when "
+        "the filter says calm, a fifth when it says turbulent. This is a risk rule "
+        "rather than a forecast -- it makes no claim about direction, only that a "
+        "constant notional means the turbulent periods dominate the P&L."
+    ),
+    assets=["UST10Y"],
+    build=_markov_risk_budget,
+    params=[
+        ParamSpec("low", "Weight in low-vol regime", 1.0, 0.0, 2.0, 0.1),
+        ParamSpec("medium", "Weight in medium-vol regime", 0.6, 0.0, 2.0, 0.1),
+        ParamSpec("high", "Weight in high-vol regime", 0.2, 0.0, 2.0, 0.1),
+    ],
+    caveat=(
+        "The weights were set by the shape of the idea (less size when it is "
+        "rougher), not fitted. Fitting them on this sample would make the "
+        "deflated Sharpe meaningless, since the deflation counts strategies, not "
+        "the parameter settings tried within them. Note the turnover: switching "
+        "on the hard argmax label makes this resize roughly 65 times a year and "
+        "costs about 100bp annually. Sizing on the filter's belief vector "
+        "instead of its argmax would plainly churn less -- that variant is "
+        "deliberately not swapped in here, because changing the strategy after "
+        "seeing its result is the second search that the deflation cannot see."
+    ),
+))
+
+
 def available_strategies(pit: pd.DataFrame) -> list[Strategy]:
     """Strategies whose required inputs are present in the loaded panel."""
     return [s for s in REGISTRY.values() if all(r in pit.columns for r in s.requires)]
