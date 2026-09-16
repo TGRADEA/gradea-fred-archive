@@ -134,6 +134,70 @@ inflation shock, and gives up 29 points through the dot-com bond rally — a
 coherent profile (a crisis hedge that costs you upside in a slow bull market)
 that the headline Sharpe of 0.65 does not show.
 
+### `volforecast.py` — the MCS + DM benchmark
+
+A port of the evaluation machinery from the "SPY Volatility Forecast Benchmark —
+MCS + DM Matrix (17 models)" entry in Trading Research (Status: Verified).
+QLIKE loss (Patton 2011), Diebold–Mariano with Newey–West errors and the
+Harvey–Leybourne–Newbold small-sample correction, and the Hansen–Lunde–Nason
+Model Confidence Set with a stationary block bootstrap.
+
+```bash
+python -m gradea_backtest volbench --dm
+```
+
+**These results are not comparable to the SPY leaderboard.** Different asset,
+different window. SPY is not in the archive and neither FRED's index nor the
+Schwab pipeline is reachable here, so this forecasts 10-year Treasury return
+variance over ~59 years instead of SPY over 200 observations. Two model families
+are absent rather than badly reimplemented: everything needing an options surface
+(HAR-VRP, VIX-Q-HAR, raw VIX²/252). That matters — HAR-VRP was the spike-day
+winner there, 10 of 10 top-RV days — so the tail question their VRP models were
+kept for is exactly the one this cannot answer.
+
+**Forced divergence: a 5-day horizon, not 1-day.** DGS10 is quoted to the basis
+point, so 11.8% of days show a yield change of exactly zero and daily realized
+variance runs three orders of magnitude below its mean in the left tail. QLIKE
+contains a `−log(actual/predicted)` term, so a near-zero actual against an
+ordinary forecast explodes: on 1-day targets the random walk scores a mean QLIKE
+of **238** against HAR's 1.4, which measures quotation granularity rather than
+skill. Weekly aggregation cuts the mean-to-1st-percentile ratio from 2653× to
+115×. The original's own "Verify Before Coding" note asks for 5-minute RV; on a
+1bp-quantised yield series the daily proxy is weaker still.
+
+Overlapping weekly targets make neighbouring losses dependent, so the DM lag and
+the bootstrap block length are both set from the horizon rather than left at
+their defaults.
+
+#### Result on Treasuries
+
+| Rank | Model | Mean QLIKE | MCS α=0.10 |
+|---|---|---|---|
+| 1 | HAR-RV | 0.3860 | in set |
+| 2 | BMA-QLIKE-Opt | 0.3918 | in set |
+| 3 | SHAR | 0.3922 | in set |
+| 4 | MS-HAR | 0.3962 | in set |
+| 5 | BMA-Equal | 0.3974 | eliminated |
+| 6 | AR1-RV | 0.6272 | eliminated |
+| 7 | Random Walk | 332.99 | eliminated |
+
+Three findings differ from the SPY run, and the difference is the asset, not a
+contradiction:
+
+1. **SHAR survives here.** Their finding #2 was that single-model innovations
+   "got statistically killed", SHAR among them. On Treasuries the
+   downside/upside variance split earns its place — bond selloffs and rallies
+   have visibly different volatility dynamics.
+2. **The ensembles do not win.** There, BMA-Equal and BMA-QLIKE-Opt took the top
+   two slots. Here plain HAR-RV wins outright and BMA-Equal is *eliminated*
+   (p=0.071), with HAR-RV beating it significantly in the DM matrix (t=−3.77).
+3. **MS-HAR survives**, fitted separately within the learned volatility regimes
+   from `markov.py` — the two ported modules meeting in the middle.
+
+What replicates is the shape of their finding #1: the spread between the top four
+is not statistically resolvable on this data either. The leaderboard has a
+winner; the confidence set does not.
+
 ## Known limitations
 
 These are stated on the dashboard too, because they change how the numbers should

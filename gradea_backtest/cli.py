@@ -207,6 +207,43 @@ def cmd_dashboard(args) -> int:
     return 0
 
 
+def cmd_volbench(args) -> int:
+    """Run the volatility forecast benchmark: MCS leaderboard plus DM matrix."""
+    from .markov import markov_regime
+    from .returns import treasury_total_return
+    from .volforecast import benchmark, walk_forward_forecasts
+
+    panel = load_full_panel()
+    returns = treasury_total_return(panel.pit[args.series], args.maturity).dropna()
+    labels, _ = markov_regime(panel.pit)
+
+    print(f"\nWalking forward over {len(returns)} days...")
+    forecasts = walk_forward_forecasts(returns, labels, horizon=args.horizon)
+    result = benchmark(forecasts, alpha=args.alpha, n_boot=args.boot)
+
+    print(
+        f"\n{args.series} {args.maturity:g}y return variance, {result['horizon']}-day horizon"
+    )
+    print(
+        f"  {result['n_aligned']} aligned observations"
+        f"  ({result['n_dropped']} dropped for non-positive forecasts)\n"
+    )
+    print(f"  MCS leaderboard (alpha={args.alpha}):\n")
+    print(f"    {'model':16s} {'mean QLIKE':>11s} {'p_MCS':>7s}   set")
+    for name, row in result["mcs"].iterrows():
+        mark = "in" if row["in_set"] else "OUT"
+        print(f"    {name:16s} {row['mean_qlike']:11.4f} {row['p_mcs']:7.3f}   {mark}")
+
+    if args.dm:
+        print("\n  DM matrix (negative = row forecasts better; |t| > 1.96 is significant):\n")
+        print("    " + result["dm"].round(2).to_string().replace("\n", "\n    "))
+    print(
+        "\n  Forecasts are one model's opinion about variance, not about direction."
+        "\n  See BACKTESTING.md for why this is not comparable to the SPY benchmark.\n"
+    )
+    return 0
+
+
 def cmd_notes(args) -> int:
     payload_caveats = build_payload.__doc__
     print("\nMODELLING NOTES\n")
@@ -269,6 +306,15 @@ def main(argv: list[str] | None = None) -> int:
     p_dash = sub.add_parser("dashboard", help="build the self-contained dashboard HTML")
     p_dash.add_argument("--out", default=None)
     p_dash.set_defaults(func=cmd_dashboard)
+
+    p_vol = sub.add_parser("volbench", help="volatility forecast benchmark (MCS + DM matrix)")
+    p_vol.add_argument("--series", default="DGS10")
+    p_vol.add_argument("--maturity", type=float, default=10.0)
+    p_vol.add_argument("--horizon", type=int, default=5, help="forecast horizon in days")
+    p_vol.add_argument("--alpha", type=float, default=0.10)
+    p_vol.add_argument("--boot", type=int, default=2000)
+    p_vol.add_argument("--dm", action="store_true", help="also print the DM matrix")
+    p_vol.set_defaults(func=cmd_volbench)
 
     p_exp = sub.add_parser("export", help="write the dashboard data payload")
     p_exp.add_argument("--out", default="dashboard/data.json")
