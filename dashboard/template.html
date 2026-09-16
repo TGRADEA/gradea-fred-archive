@@ -273,6 +273,19 @@ td.num,th.num{font-family:"IBM Plex Mono",Menlo,monospace; font-variant-numeric:
 
   <section class="panel">
     <div class="panel-head">
+      <h2>When it mattered</h2>
+      <span class="hint">vs Hold 10y Treasury</span>
+    </div>
+    <p class="lede">A full-sample Sharpe says nothing about whether the position
+      was right on the handful of days that decided a decade. These are fixed
+      historical episodes, chosen from the record rather than from any strategy's
+      returns.</p>
+    <div class="chart" id="crisis-chart"><div class="tip" id="crisis-tip"></div></div>
+    <div class="tablewrap"><table id="crisis-table"></table></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
       <h2>Calendar years</h2>
       <span class="hint">net return per year</span>
     </div>
@@ -704,6 +717,55 @@ function intervalChart(host,tip,rows,refLine){
   svg.addEventListener("pointerleave",()=>tip.style.opacity=0);
 }
 
+function crisisChart(host,tip,rows){
+  if(!rows||!rows.length){ host.innerHTML='<p class="lede">This strategy did not trade through any of the named episodes.</p>'; return; }
+  const W=900, rowH=30, H=rows.length*rowH+34, L=196, R=70, iw=W-L-R;
+  const svg=svgRoot(host,W,H);
+  const vals=rows.map(r=>r.excess==null?0:r.excess);
+  const lo=Math.min(0,...vals), hi=Math.max(0,...vals), span=(hi-lo)||1;
+  const X=(v)=> L+(v-lo)/span*iw, zero=X(0);
+  niceTicks(lo,hi,5).forEach(v=>{
+    const x=X(v);
+    el("line",{x1:x,x2:x,y1:20,y2:H-10,stroke:css("--grid"),"stroke-width":1},svg);
+    const t=el("text",{x,y:14,"text-anchor":"middle","font-size":10.5,fill:css("--ink-3")},svg);
+    t.setAttribute("font-family",'"IBM Plex Mono",monospace'); t.textContent=(v*100).toFixed(0)+"%";
+  });
+  el("line",{x1:zero,x2:zero,y1:20,y2:H-10,stroke:css("--line-strong"),"stroke-width":1},svg);
+  rows.forEach((r,i)=>{
+    const y=28+i*rowH, v=r.excess==null?0:r.excess;
+    const c = v>=0? css("--pos") : css("--neg");
+    const x0=Math.min(zero,X(v)), w=Math.max(Math.abs(X(v)-zero),2);
+    el("rect",{x:x0,y:y,width:w,height:16,rx:3,fill:c,opacity:.9},svg);
+    const lab=el("text",{x:L-12,y:y+12,"text-anchor":"end","font-size":11.5,fill:css("--ink")},svg);
+    lab.textContent=r.window;
+    const val=el("text",{x:W-R+10,y:y+12,"font-size":11,fill:css("--ink-2")},svg);
+    val.setAttribute("font-family",'"IBM Plex Mono",monospace');
+    val.textContent=(v>=0?"+":"")+(v*100).toFixed(1)+"%";
+    const hit=el("rect",{x:0,y:y-6,width:W,height:rowH,fill:"transparent"},svg);
+    hit.addEventListener("pointerenter",()=>{
+      tip.innerHTML=`<div class="tdate mono">${r.start} &rarr; ${r.end}</div>
+        <div class="trow"><span>strategy</span><b class="num">${pct(r.ret,1)}</b></div>
+        <div class="trow"><span>Hold 10y</span><b class="num">${r.bench_ret==null?"&mdash;":pct(r.bench_ret,1)}</b></div>
+        <div class="trow"><span>difference</span><b class="num">${r.excess==null?"&mdash;":pct(r.excess,1)}</b></div>
+        <div class="trow"><span>max DD</span><b class="num">${pct(r.max_drawdown,1)}</b></div>`;
+      tip.style.opacity=1;
+      const hostR=host.getBoundingClientRect();
+      tip.style.left=Math.min((L/W)*hostR.width, hostR.width-tip.offsetWidth-4)+"px";
+      tip.style.top=((y/H)*hostR.height)+"px";
+    });
+  });
+  svg.addEventListener("pointerleave",()=>tip.style.opacity=0);
+
+  $("crisis-table").innerHTML=`<thead><tr><th>Episode</th><th class="num">Window</th>
+    <th class="num">Strategy</th><th class="num">Hold 10y</th><th class="num">Difference</th>
+    <th class="num">Max DD</th></tr></thead><tbody>${rows.map(r=>`<tr>
+      <td>${r.window}</td><td class="num thin">${r.start.slice(0,7)} &ndash; ${r.end.slice(0,7)}</td>
+      <td class="num">${pct(r.ret,1)}</td>
+      <td class="num thin">${r.bench_ret==null?"&mdash;":pct(r.bench_ret,1)}</td>
+      <td class="num" style="color:${(r.excess??0)>=0?css("--pos"):css("--neg")}">${r.excess==null?"&mdash;":((r.excess>=0?"+":"")+pct(r.excess,1))}</td>
+      <td class="num">${pct(r.max_drawdown,1)}</td></tr>`).join("")}</tbody>`;
+}
+
 function verdictClass(d){ return d>=0.95?"v-strong": d>=0.90?"v-mid":"v-weak"; }
 
 function renderSignificance(){
@@ -846,6 +908,7 @@ function render(){
   attrChart($("attr-chart"),$("attr-tip"),rows);
   attrTable(rows);
 
+  crisisChart($("crisis-chart"),$("crisis-tip"),s.crisis||[]);
   yearChart($("yr-chart"),$("yr-tip"),s.by_year||[]);
   renderSignificance();
   cmpTable();

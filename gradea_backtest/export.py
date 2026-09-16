@@ -23,7 +23,7 @@ import pandas as pd
 from .data import Panel, derived_columns, load_full_panel
 from .engine import BacktestResult, run_backtest
 from .ingest import RECOMMENDED
-from .metrics import compute_metrics
+from .metrics import CRISIS_WINDOWS, compute_metrics, crisis_table
 from .regimes import FAMILY_DESCRIPTIONS, LABEL_ORDER, build_regimes
 from .returns import ASSET_LABELS, build_asset_returns
 from .significance import assess, expected_maximum_sharpe
@@ -111,6 +111,23 @@ def build_payload(
 
         sig = assess(result.net_returns, searched, n_boot=1500)
 
+        # Benchmark every crisis window against buy-and-hold duration, so the
+        # question is "did this help when it mattered", not "did it make money".
+        bench = next((r.net_returns for sp, r in zip(specs, results) if sp.key == "hold_10y"), None)
+        crisis = []
+        table = crisis_table(result.net_returns, bench)
+        for label, row in table.iterrows():
+            crisis.append(
+                {
+                    "window": label, "start": row["start"], "end": row["end"],
+                    "ret": _round(row["ret"], 5),
+                    "max_drawdown": _round(row["max_drawdown"], 5),
+                    "bench_ret": _round(row["bench_ret"], 5) if row["bench_ret"] is not None else None,
+                    "excess": _round(row["excess"], 5) if row["excess"] is not None else None,
+                    "n_days": int(row["n_days"]),
+                }
+            )
+
         attribution = {}
         for family, table in result.attribution.items():
             order = LABEL_ORDER.get(family, list(table.index))
@@ -169,6 +186,7 @@ def build_payload(
                 "exposure": _series_on(grid, result.weights.abs().sum(axis=1), 3),
                 "attribution": attribution,
                 "by_year": by_year,
+                "crisis": crisis,
                 "warnings": result.warnings,
             }
         )

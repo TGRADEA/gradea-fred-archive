@@ -188,3 +188,71 @@ def subperiod_table(returns: pd.Series, freq: str = "YE", risk_free: pd.Series |
             }
         )
     return pd.DataFrame(rows).set_index("period")
+
+
+#: Named crisis windows, for the comparison panel.
+#:
+#: The pattern comes from QuantConnect Lean's Report module, catalogued as Tier 2
+#: prior art in the GradeA Competitive Intel review ("named crisis-event windows
+#: as comparison panels in a performance report, with a drawdown collection
+#: rendered as its own report section rather than as an annotation on the equity
+#: curve"). It earns its place here for a specific reason: a full-sample Sharpe
+#: says nothing about whether a strategy was holding the right position on the
+#: handful of days that decided the decade. These windows are where a macro
+#: strategy is actually tested.
+#:
+#: Dates bracket each episode generously rather than trying to call the exact
+#: turn, because a strategy that only works if you time the entry to the week is
+#: not a strategy. They are fixed historical facts, chosen from the record and
+#: not from any strategy's returns.
+CRISIS_WINDOWS: tuple[tuple[str, str, str], ...] = (
+    ("Volcker shock", "1979-10-01", "1982-11-30"),
+    ("Black Monday", "1987-09-01", "1987-12-31"),
+    ("LTCM / Russia", "1998-07-01", "1998-11-30"),
+    ("Dot-com unwind", "2000-03-01", "2002-10-31"),
+    ("Global financial crisis", "2007-07-01", "2009-03-31"),
+    ("Euro sovereign crisis", "2011-07-01", "2011-12-31"),
+    ("Taper tantrum", "2013-05-01", "2013-09-30"),
+    ("COVID crash", "2020-02-01", "2020-04-30"),
+    ("Inflation shock", "2022-01-01", "2022-10-31"),
+    ("SVB / banking stress", "2023-03-01", "2023-05-31"),
+)
+
+
+def crisis_table(
+    returns: pd.Series,
+    benchmark: pd.Series | None = None,
+    windows: tuple[tuple[str, str, str], ...] = CRISIS_WINDOWS,
+) -> pd.DataFrame:
+    """Performance inside each named crisis window.
+
+    A window the strategy did not trade through is omitted rather than reported
+    as zero -- a strategy that did not exist in 1987 did not survive 1987.
+    """
+    r = returns.dropna()
+    rows = []
+    for label, start, end in windows:
+        block = r.loc[start:end]
+        # Require most of a window before reporting it; a fortnight of overlap at
+        # the edge of the sample is not participation in the episode.
+        expected = len(pd.bdate_range(start, end))
+        if block.size < max(20, expected * 0.5):
+            continue
+        entry = {
+            "window": label,
+            "start": start,
+            "end": end,
+            "ret": float((1 + block).prod() - 1),
+            "max_drawdown": float(drawdown_curve(block).min()),
+            "n_days": int(block.size),
+            "bench_ret": None,
+            "excess": None,
+        }
+        if benchmark is not None:
+            b = benchmark.dropna().loc[start:end]
+            if b.size >= block.size * 0.5:
+                bench = float((1 + b).prod() - 1)
+                entry["bench_ret"] = bench
+                entry["excess"] = entry["ret"] - bench
+        rows.append(entry)
+    return pd.DataFrame(rows).set_index("window") if rows else pd.DataFrame()

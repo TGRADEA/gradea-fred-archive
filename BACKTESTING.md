@@ -118,6 +118,22 @@ unlevered 2y position scoring 2.2 against a zero cash rate widens that spread
 enormously. That would bury every real result under an artefact of how the
 benchmark is financed.
 
+## Crisis windows
+
+`metrics.CRISIS_WINDOWS` and the dashboard's "When it mattered" panel come from
+QuantConnect Lean's Report module, catalogued as Tier 2 prior art in the GradeA
+Competitive Intel review ("named crisis-event windows as comparison panels...
+with a drawdown collection rendered as its own report section"). Each strategy is
+compared against buy-and-hold duration across ten fixed historical episodes,
+chosen from the record rather than from any strategy's returns.
+
+It earns its place because a full-sample Sharpe says nothing about whether the
+position was right on the days that decided a decade. `nfci_duration` beats the
+benchmark through Volcker, Black Monday, the GFC, the taper tantrum and the 2022
+inflation shock, and gives up 29 points through the dot-com bond rally — a
+coherent profile (a crisis hedge that costs you upside in a slow bull market)
+that the headline Sharpe of 0.65 does not show.
+
 ## Known limitations
 
 These are stated on the dashboard too, because they change how the numbers should
