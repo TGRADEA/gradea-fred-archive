@@ -54,6 +54,14 @@ series that changed, so `git log -p DGS10.csv` is a usable revision history:
 FRED revises modeled and preliminary series after first publication, and each
 revision appears here as a diff.
 
+## Backtesting toolkit
+
+`gradea_backtest/` is a regime-aware backtester built on these five series, with
+a self-contained dashboard in `dashboard/`. It is strictly additive: it reads the
+archive and never writes to it, and `python -m gradea_backtest verify` checks the
+CSVs against `manifest.json` without modifying anything. See
+[BACKTESTING.md](BACKTESTING.md).
+
 ## Do not force-push
 
 This repo is the only backup. History is the vintage record; rewriting it
