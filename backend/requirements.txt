@@ -1,0 +1,18 @@
+# backend/ — Schwab chain-snapshot capture + Supabase mirror.
+# Pins match gradea-trading-platform/gradea-backend/requirements.in at the
+# commit these modules were copied from, so the two trees stay diffable.
+schwab-py==1.5.0
+python-dotenv==1.0.1
+httpx==0.27.2
+pyarrow==22.0.0
+numpy==2.3.3
+pandas==3.0.2
+pandas-market-calendars==4.4.2
+pydantic==2.12.5
+pydantic-settings==2.6.1
+
+# Dev / test
+pytest==8.3.3
+pytest-asyncio==0.24.0
+ruff==0.7.4
+black==24.10.0

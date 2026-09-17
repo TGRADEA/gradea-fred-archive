@@ -8,3 +8,15 @@ __pycache__/
 # locally; the template beside it is the source.
 dashboard/data.json
 dashboard/regime-desk.html
+
+# backend/ — secrets, local state, and the snapshot store (mirrored to
+# Supabase by backend/chain_snapshot_mirror.py; never committed).
+backend/.env
+backend/.env.*
+backend/tokens.json
+backend/*.token
+backend/gradea.db
+backend/gradea.db-*
+backend/data/
+backend/.venv/
+backend/.ruff_cache/

@@ -1,7 +1,19 @@
-# gradea-fred-archive
+# gradea_v4
 
-Off-box mirror of the GradeA FRED series archive
-(`gradea-backend/data/fred/`). Established by **FOUNDATION-FRED-MIRROR-1**.
+The GradeA v4 line. Three things live here:
+
+- **FRED archive** (repo root) — the off-box mirror of the GradeA FRED series
+  archive (`gradea-backend/data/fred/`), established by
+  **FOUNDATION-FRED-MIRROR-1**. Everything below this section is about it.
+- **Backtesting toolkit** (`gradea_backtest/`, `dashboard/`) — see
+  [BACKTESTING.md](BACKTESTING.md).
+- **Backend pipeline** (`backend/`) — Schwab option-chain snapshot capture and
+  the Supabase mirror, copied file-for-file from `gradea-trading-platform`.
+  See [backend/README.md](backend/README.md).
+
+This repository was `gradea-fred-archive` until 2026-09-17; GitHub redirects
+the old name. The archive rules below (append-only, never force-push) are
+unchanged by the rename.
 
 ## Why this repo exists
 
@@ -31,8 +43,8 @@ null values — FRED's no-observation rows are dropped at the network boundary.
 ## Restoring
 
 ```bash
-git clone git@github.com:TGRADEA/gradea-fred-archive.git ~/gradea-fred-archive
-export GRADEA_FRED_MIRROR_PATH="$HOME/gradea-fred-archive"
+git clone git@github.com:TGRADEA/gradea_v4.git ~/gradea_v4
+export GRADEA_FRED_MIRROR_PATH="$HOME/gradea_v4"
 cd /path/to/gradea-trading-platform/gradea-backend
 python scripts/mirror_fred.py --verify-all     # must exit 0 before restoring
 python scripts/mirror_fred.py --restore-all
