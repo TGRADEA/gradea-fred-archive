@@ -1,0 +1,25 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --tb=short"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+filterwarnings = [
+    "ignore:Slicing with a datetime.date object is deprecated:DeprecationWarning",
+    "ignore:Slicing with a datetime.date object is deprecated:UserWarning",
+    "ignore::pandas.errors.Pandas4Warning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "W"]
+ignore = ["E501", "N806", "N802", "E741", "E731", "E702", "E402", "B007", "F841"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["F401", "F811"]
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
