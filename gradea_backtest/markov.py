@@ -1,183 +1,327 @@
 """Markov-switching volatility regimes.
 
-Ported from the `MarkovRegime` class in Roman Paolucci's (QuantGuild)
-"Markov Chain Regime Switching Bot" lectures, parts 1 and 2. The algorithm is
-his; three adaptations were needed to make it safe for a backtest, and they are
-documented below because two of them change what the output means.
+A three-state hidden Markov model over log daily volatility, fitted by
+Baum-Welch on expanding history and used for *filtered* inference only.
 
-**Why this belongs here.** Every other regime family in this package is a rule
-someone wrote down: a curve is inverted when the slope is negative, conditions
-are tight when NFCI is positive. Those thresholds are defensible but they are
-assumptions, not findings. This classifier instead *learns* where the regime
-boundaries sit from the data, and carries a probability rather than a hard
-label, so a day that sits between regimes is reported as sitting between them.
+Provenance
+----------
+This is an independent implementation from the primary literature:
 
-**The mechanism.** Three hidden states emit an observed volatility through
-state-specific Gaussians. A transition matrix with a heavy diagonal makes states
-sticky, which is the empirical fact the model exists to exploit: calm periods
-cluster, and so do turbulent ones. Belief is carried forward by Bayes' rule --
-predict through the transition matrix, weight by the likelihood of what was
-actually observed, renormalise.
+* Rabiner (1989), "A Tutorial on Hidden Markov Models and Selected
+  Applications in Speech Recognition", Proc. IEEE 77(2) -- the forward-backward
+  recursions, Baum-Welch re-estimation, and the scaling used for numerical
+  stability.
+* Hamilton (1989), "A New Approach to the Economic Analysis of Nonstationary
+  Time Series and the Business Cycle", Econometrica 57(2) -- Markov-switching
+  applied to an economic series, and the filtered-probability object this module
+  returns.
+* Dempster, Laird & Rubin (1977), "Maximum Likelihood from Incomplete Data via
+  the EM Algorithm", JRSS-B 39(1) -- the EM framework Baum-Welch instantiates.
 
-Adaptations
------------
-1. **The observation.** The original reads intraday range, ``(high - low) /
-   close``, from live Interactive Brokers bars. The archive has one number per
-   day, so the daily analogue used here is the absolute change in the 10-year
-   yield. It measures the same thing -- how far the market travelled -- at the
-   only resolution available.
+An earlier version of this file adapted the `MarkovRegime` class from the
+QuantGuild lecture repository. That repository carries no licence, so it grants
+no copy permission, and this repository is public. Everything specific to that
+implementation has been removed: the hand-set transition prior, the
+percentile-thirds state seeding, its smoothing constants, and its emission
+defaults. Nothing here is derived from it. The lecture series remains the reason
+the hypothesis was worth testing, which is the use the GradeA knowledge base
+records for that library -- concepts and mathematics, implemented from source.
 
-2. **Recalibration is expanding, not once.** This is the load-bearing change.
-   The original calibrates on a block of history and then runs live, which is
-   correct for a live bot: everything it was fitted on really is in its past.
-   Fitting once over a *backtest* sample is a different thing entirely, because
-   the emission means and transition matrix would then encode the 2008 and 2020
-   volatility spikes into the model's 1985 labels. Here the model is refitted
-   every ``recalibrate_every`` days using only observations up to that point, and
-   the filter runs forward between refits. Labels are therefore reproducible
-   from data that existed when they were assigned, which
-   ``tests/test_no_lookahead.py`` checks by deleting the future and requiring
-   identical output.
+Design
+------
+**Log-volatility emissions.** Volatility is positive and right-skewed, so the
+observation is modelled as Gaussian in logs rather than in levels. A level-space
+Gaussian assigns real probability mass to negative volatility and is dominated
+by the right tail when fitted.
 
-3. **Filtering only, never smoothing.** The forward filter is kept exactly as
-   written, and deliberately: the obvious "improvement" is to run
-   Baum-Welch or Viterbi over the whole series to get better labels, and that
-   would be a lookahead of the worst kind -- the labels would look superb and
-   every strategy conditioned on them would be untradeable. Filtering answers
-   "what regime am I in, given what I have seen", which is the only question a
-   trader can ask.
+**Zeros are interval-censored, and the interval is sampled rather than
+collapsed.** DGS10 is quoted to the basis point, so 11.8% of days print an
+unchanged yield. That is not zero volatility; it means the move was smaller than
+half a tick. Discarding those days would delete precisely the calmest ones.
+
+Flooring them all at a single value is worse. It puts 11.8% of the sample on one
+identical observation, and a Gaussian mixture will spend an entire state on that
+spike: fitted that way, the "low volatility" state is not a market condition at
+all, it is the set of days the yield did not move, and the remaining two states
+are left to cover everything else. The first version of this file did exactly
+that and assigned 68% of the sample to the high state.
+
+An unchanged print means the true move is somewhere in [0, half a tick), so each
+censored day is placed uniformly inside that interval. The draw is derived
+deterministically from the observation's own date, so a given day always
+receives the same value regardless of where the series is cut -- randomness here
+would break both reproducibility and the truncation-invariance guarantee.
+
+**Baum-Welch fits; forward filtering infers.** These are different operations
+and only one of them is safe for a signal:
+
+* *Fitting* runs forward-backward over a training window that lies entirely in
+  the past. Using the whole of that window to estimate parameters is ordinary
+  in-sample estimation, not lookahead.
+* *Inference* for day t uses the forward recursion alone -- predict through the
+  transition matrix, weight by the likelihood of what was observed, renormalise.
+  The smoothed (forward-backward) state probabilities are never used as labels.
+
+The second point is the one that matters. Smoothed probabilities at day t
+incorporate observations after t, so a strategy conditioned on them is
+untradeable however good its backtest looks. The GradeA review of this lecture
+material flagged the same hazard independently: "those smoothed probabilities
+include later observations and must not be used as contemporaneous trading
+signals."
+
+**Expanding recalibration.** Parameters are refitted periodically on everything
+strictly before the current day, so a 1985 label never depends on 2008.
+``tests/test_markov_and_significance.py`` checks this by deleting the future and
+requiring identical output.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
 
-#: Sticky by construction: a regime is far more likely to persist than to
-#: switch, and a jump from calm straight to turbulent is rare. These are the
-#: original's priors, used until enough history accrues to estimate them.
-DEFAULT_TRANSITION = np.array(
-    [
-        [0.90, 0.08, 0.02],  # from Low
-        [0.10, 0.80, 0.10],  # from Medium
-        [0.02, 0.08, 0.90],  # from High
-    ]
-)
+#: Three states: the smallest number that can express "neither calm nor
+#: stressed". Four cannot be estimated reliably from the number of genuine
+#: volatility cycles in a few decades of daily data.
+DEFAULT_N_STATES = 3
 
 STATE_LABELS = ("Low vol", "Medium vol", "High vol")
 
-#: Minimum observations before the model is fitted at all. Below this the
-#: emission parameters are estimated from too few points to mean anything.
+#: Symmetric Dirichlet concentration on each transition row. One is the uniform
+#: prior (add-one smoothing): it keeps every transition possible when a training
+#: window happens to contain none of a given kind, without which a state can
+#: become absorbing on one unlucky window.
+TRANSITION_PRIOR = 1.0
+
+#: Baum-Welch stops when the average log-likelihood improves by less than this,
+#: or after this many sweeps. EM increases the likelihood monotonically, so the
+#: iteration cap is a wall-clock bound rather than a correctness one.
+EM_TOL = 1e-5
+EM_MAX_ITER = 20
+
+#: Minimum observations before a fit is attempted at all.
 MIN_CALIBRATION = 250
 
+#: Cap on the estimation window, in observations. Five years.
+#:
+#: Fitting is expanding up to this cap and rolling beyond it, for a modelling
+#: reason rather than a computational one: a single parameter set estimated over
+#: sixty years assumes the volatility process is stationary across the Volcker
+#: disinflation, the Greenspan era and ZIRP, which it plainly is not. A 2026 fit
+#: dominated by 1980s yield dynamics describes neither. Five years is ample for
+#: three states -- six emission parameters and nine transitions against 1,260
+#: observations -- and it keeps the guarantee that matters: every observation
+#: used lies strictly in the past.
+MAX_TRAIN = 1260
+
+#: Window, in sessions, over which volatility is estimated before being handed
+#: to the model. Five is one trading week: long enough to estimate a scale
+#: rather than draw one sample from it, short enough that a regime change is not
+#: smoothed away.
+VOL_WINDOW = 5
+
+#: Floor on the RMS, as a decimal rate: half the quotation tick. Reached only if
+#: every session in the window printed an unchanged yield.
+RMS_FLOOR = 0.000025
+
+_LOG_2PI = float(np.log(2.0 * np.pi))
+
+
+# ---------------------------------------------------------------------------
+# Numerics
+# ---------------------------------------------------------------------------
+
+def _logsumexp(a: np.ndarray, axis: int | None = None, keepdims: bool = False) -> np.ndarray:
+    peak = np.max(a, axis=axis, keepdims=True)
+    peak = np.where(np.isfinite(peak), peak, 0.0)
+    out = peak + np.log(np.sum(np.exp(a - peak), axis=axis, keepdims=True))
+    return out if keepdims else np.squeeze(out, axis=axis)
+
+
+def _gaussian_logpdf(x: np.ndarray, mean: np.ndarray, sd: np.ndarray) -> np.ndarray:
+    """Log density of each observation under each state. Shape (T, K)."""
+    z = (x[:, None] - mean[None, :]) / sd[None, :]
+    return -0.5 * (z * z + _LOG_2PI) - np.log(sd)[None, :]
+
+
+def _kmeans_1d(x: np.ndarray, k: int, seed: int = 0, iters: int = 60) -> np.ndarray:
+    """Lloyd's algorithm on a scalar series, returning sorted centres.
+
+    Rabiner §V.B initialises HMM emissions by clustering, which is what this
+    does. Quantiles of the observation would also cluster it, but they fix the
+    state sizes in advance; k-means lets the data decide how large the calm
+    state is, which is the question being asked.
+    """
+    rng = np.random.default_rng(seed)
+    lo, hi = float(np.min(x)), float(np.max(x))
+    centres = np.sort(rng.uniform(lo, hi, size=k)) if hi > lo else np.full(k, lo)
+    for _ in range(iters):
+        labels = np.argmin(np.abs(x[:, None] - centres[None, :]), axis=1)
+        moved = False
+        for j in range(k):
+            members = x[labels == j]
+            if members.size:
+                new = float(members.mean())
+                if abs(new - centres[j]) > 1e-12:
+                    moved = True
+                centres[j] = new
+        centres = np.sort(centres)
+        if not moved:
+            break
+    return centres
+
+
+# ---------------------------------------------------------------------------
+# Model
+# ---------------------------------------------------------------------------
 
 @dataclass
-class MarkovVolatilityRegime:
-    """Three-state Markov-switching classifier over a volatility observation.
+class HMMParams:
+    """Fitted parameters, all in log space where they are probabilities."""
 
-    Attributes
-    ----------
-    n_states:
-        Fixed at three. The original's choice, kept: two states cannot express
-        "neither calm nor stressed", and four cannot be estimated reliably from
-        the number of genuine volatility cycles in any realistic sample.
-    state_probs:
-        The belief vector, ``P(state = i | observations so far)``. Sums to one.
+    log_pi: np.ndarray   # (K,) initial state distribution
+    log_A: np.ndarray    # (K, K) transition matrix, rows sum to one
+    mean: np.ndarray     # (K,) emission mean of log volatility
+    sd: np.ndarray       # (K,) emission standard deviation
+
+    @property
+    def n_states(self) -> int:
+        return self.mean.size
+
+
+def _forward_backward(log_b: np.ndarray, p: HMMParams) -> tuple[np.ndarray, np.ndarray, float]:
+    """Log alpha, log beta and the log-likelihood (Rabiner §III.A-B)."""
+    T, K = log_b.shape
+    log_alpha = np.empty((T, K))
+    log_beta = np.zeros((T, K))
+
+    log_alpha[0] = p.log_pi + log_b[0]
+    for t in range(1, T):
+        log_alpha[t] = log_b[t] + _logsumexp(log_alpha[t - 1][:, None] + p.log_A, axis=0)
+
+    for t in range(T - 2, -1, -1):
+        log_beta[t] = _logsumexp(p.log_A + (log_b[t + 1] + log_beta[t + 1])[None, :], axis=1)
+
+    return log_alpha, log_beta, float(_logsumexp(log_alpha[-1]))
+
+
+def fit_hmm(
+    x: np.ndarray,
+    n_states: int = DEFAULT_N_STATES,
+    seed: int = 0,
+    max_iter: int = EM_MAX_ITER,
+    tol: float = EM_TOL,
+    max_train: int = MAX_TRAIN,
+) -> HMMParams | None:
+    """Fit a Gaussian HMM to ``x`` by Baum-Welch. Returns None if too short.
+
+    ``x`` is log volatility. States come back sorted by emission mean, so index
+    0 is always the calmest -- without that the state labels permute freely
+    between refits and a strategy conditioned on them would flip at random.
     """
+    x = np.asarray(x, dtype="float64")
+    x = x[np.isfinite(x)]
+    if x.size < MIN_CALIBRATION:
+        return None
+    if max_train and x.size > max_train:
+        x = x[-max_train:]          # most recent window, still entirely past
+    T = x.size
 
-    n_states: int = 3
-    transition_matrix: np.ndarray = field(default_factory=lambda: DEFAULT_TRANSITION.copy())
-    emission_means: np.ndarray = field(default_factory=lambda: np.array([0.0005, 0.002, 0.005]))
-    emission_stds: np.ndarray = field(default_factory=lambda: np.array([0.0003, 0.001, 0.003]))
-    state_probs: np.ndarray = field(default_factory=lambda: np.full(3, 1 / 3))
+    centres = _kmeans_1d(x, n_states, seed=seed)
+    labels = np.argmin(np.abs(x[:, None] - centres[None, :]), axis=1)
+    sd = np.array(
+        [x[labels == j].std() if (labels == j).sum() > 2 else x.std() for j in range(n_states)]
+    )
+    sd = np.maximum(sd, 1e-6)
+    p = HMMParams(
+        log_pi=np.full(n_states, -np.log(n_states)),
+        log_A=np.full((n_states, n_states), -np.log(n_states)),
+        mean=centres.copy(),
+        sd=sd,
+    )
 
-    def calibrate(self, observations: np.ndarray) -> bool:
-        """Fit emissions and transitions to a window of past observations.
+    prev_ll = -np.inf
+    for _ in range(max_iter):
+        log_b = _gaussian_logpdf(x, p.mean, p.sd)
+        log_alpha, log_beta, ll = _forward_backward(log_b, p)
 
-        Returns False and leaves the model untouched when the window is too
-        short to estimate anything -- a silently half-fitted model is worse than
-        an unfitted one.
-        """
-        obs = np.asarray(observations, dtype="float64")
-        obs = obs[np.isfinite(obs) & (obs > 0)]
-        if obs.size < MIN_CALIBRATION:
-            return False
+        # E step: gamma (state posteriors) and xi (transition posteriors).
+        log_gamma = log_alpha + log_beta
+        log_gamma -= _logsumexp(log_gamma, axis=1, keepdims=True)
+        gamma = np.exp(log_gamma)
 
-        # Seed the state assignment by splitting the observed distribution into
-        # thirds. Because the split is by percentile, the resulting emission
-        # means are monotone in the state index by construction, so Low really
-        # is the low-volatility state and the transition matrix estimated below
-        # is indexed consistently with them.
-        p33, p67 = np.percentile(obs, [33, 67])
-        assignment = np.zeros(obs.size, dtype=int)
-        assignment[obs >= p33] = 1
-        assignment[obs >= p67] = 2
+        log_xi_num = (
+            log_alpha[:-1, :, None]
+            + p.log_A[None, :, :]
+            + (log_b[1:] + log_beta[1:])[:, None, :]
+        )
+        xi = np.exp(log_xi_num - _logsumexp(log_xi_num.reshape(T - 1, -1), axis=1)[:, None, None])
 
-        means = self.emission_means.copy()
-        stds = self.emission_stds.copy()
-        for state in range(self.n_states):
-            block = obs[assignment == state]
-            if block.size >= 3:
-                means[state] = float(block.mean())
-                # A zero standard deviation would make the likelihood a spike
-                # and the filter would lock onto one state permanently.
-                stds[state] = float(max(block.std(), 1e-9))
+        # M step. The Dirichlet prior is added as pseudo-counts on the
+        # transition numerator, which is the MAP rather than ML update.
+        trans = xi.sum(axis=0) + TRANSITION_PRIOR
+        log_A = np.log(trans) - np.log(trans.sum(axis=1, keepdims=True))
 
-        # Transitions counted off the seed assignment, with Laplace smoothing so
-        # a transition never seen in the window is improbable rather than
-        # impossible. Without it one unlucky window makes a state absorbing.
-        counts = np.zeros((self.n_states, self.n_states))
-        for t in range(1, assignment.size):
-            counts[assignment[t - 1], assignment[t]] += 1
-        matrix = self.transition_matrix.copy()
-        for i in range(self.n_states):
-            row = counts[i].sum()
-            if row > 0:
-                matrix[i] = (counts[i] + 0.1) / (row + 0.3)
+        weight = gamma.sum(axis=0)
+        mean = (gamma * x[:, None]).sum(axis=0) / np.maximum(weight, 1e-12)
+        var = (gamma * (x[:, None] - mean[None, :]) ** 2).sum(axis=0) / np.maximum(weight, 1e-12)
+        sd = np.sqrt(np.maximum(var, 1e-12))
 
-        self.emission_means, self.emission_stds, self.transition_matrix = means, stds, matrix
-        return True
+        log_pi = log_gamma[0] - _logsumexp(log_gamma[0])
+        p = HMMParams(log_pi=log_pi, log_A=log_A, mean=mean, sd=sd)
 
-    def _likelihoods(self, value: float) -> np.ndarray:
-        """Gaussian emission density of ``value`` under each state."""
-        z = (value - self.emission_means) / self.emission_stds
-        return np.exp(-0.5 * z * z) / (self.emission_stds * np.sqrt(2 * np.pi))
+        if ll - prev_ll < tol * max(abs(prev_ll), 1.0):
+            break
+        prev_ll = ll
 
-    def step(self, value: float) -> np.ndarray:
-        """Advance the belief one observation and return the new belief vector.
-
-        Predict through the transition matrix, weight by how likely each state
-        makes what was actually observed, renormalise. A non-finite observation
-        advances the prediction without conditioning on anything, which is the
-        correct handling of a missing day rather than a reason to guess.
-        """
-        predicted = self.state_probs @ self.transition_matrix
-        if not np.isfinite(value) or value <= 0:
-            self.state_probs = predicted / predicted.sum()
-            return self.state_probs
-
-        posterior = predicted * self._likelihoods(value)
-        total = posterior.sum()
-        if not np.isfinite(total) or total <= 0:
-            # Every state calls the observation impossible -- far outside all
-            # three Gaussians. Fall back to the prediction rather than dividing
-            # by zero; the next recalibration will widen the emissions.
-            self.state_probs = predicted / predicted.sum()
-        else:
-            self.state_probs = posterior / total
-        return self.state_probs
+    # Sort states by emission mean and permute everything consistently.
+    order = np.argsort(p.mean)
+    return HMMParams(
+        log_pi=p.log_pi[order],
+        log_A=p.log_A[np.ix_(order, order)],
+        mean=p.mean[order],
+        sd=p.sd[order],
+    )
 
 
-def volatility_observation(pit: pd.DataFrame, column: str = "DGS10") -> pd.Series:
-    """The daily analogue of the original's intraday bar range.
+def filter_step(belief: np.ndarray, value: float, p: HMMParams) -> np.ndarray:
+    """Advance the filtered state distribution by one observation.
 
-    Absolute day-on-day change in the yield, in decimals. Taken from the
+    Predict through the transition matrix, weight by how likely each state makes
+    what was actually observed, renormalise. This is the forward recursion alone
+    -- the only inference a trader can act on, because it conditions on the past
+    and present and nothing else.
+    """
+    log_prior = _logsumexp(np.log(np.maximum(belief, 1e-300))[:, None] + p.log_A, axis=0)
+    if not np.isfinite(value):
+        out = np.exp(log_prior - _logsumexp(log_prior))
+        return out / out.sum()
+    log_post = log_prior + _gaussian_logpdf(np.array([value]), p.mean, p.sd)[0]
+    total = _logsumexp(log_post)
+    if not np.isfinite(total):
+        out = np.exp(log_prior - _logsumexp(log_prior))
+        return out / out.sum()
+    return np.exp(log_post - total)
+
+
+# ---------------------------------------------------------------------------
+# Observation and driver
+# ---------------------------------------------------------------------------
+
+def volatility_observation(
+    pit: pd.DataFrame, column: str = "DGS10", window: int = VOL_WINDOW
+) -> pd.Series:
+    """Log root-mean-square daily yield change over a trailing window.
+
+    Reads days t-window+1 through t inclusive and is taken from the
     publication-lagged panel, so the observation driving a label on day t was
     knowable on day t.
     """
-    return (pit[column].diff().abs() / 100.0).rename("vol_obs")
+    dy = pit[column].diff() / 100.0
+    rms = (dy.pow(2).rolling(window, min_periods=window).mean()).pow(0.5)
+    return np.log(rms.clip(lower=RMS_FLOOR)).rename("log_vol")
 
 
 def markov_regime(
@@ -185,43 +329,44 @@ def markov_regime(
     column: str = "DGS10",
     recalibrate_every: int = 252,
     warmup: int = 756,
+    n_states: int = DEFAULT_N_STATES,
 ) -> tuple[pd.Series, pd.DataFrame]:
-    """Run the filter across the panel, refitting on expanding history.
+    """Filtered volatility-regime labels and the belief matrix behind them.
 
-    Returns the hard label per day and the full belief matrix. The belief is
-    worth keeping: a strategy sized by ``P(high vol)`` behaves very differently
-    from one that flips on ``argmax``, and the dashboard shows how often the
-    model is actually confident.
+    The belief is worth keeping: a strategy sized by P(high vol) behaves
+    differently from one that flips on argmax, and the share of days on which
+    the filter is actually confident is itself a diagnostic.
     """
     obs = volatility_observation(pit, column)
     values = obs.to_numpy(dtype="float64")
     index = obs.index
 
-    model = MarkovVolatilityRegime()
-    calibrated = False
-    beliefs = np.full((values.size, 3), np.nan)
+    params: HMMParams | None = None
+    belief = np.full(n_states, 1.0 / n_states)
+    beliefs = np.full((values.size, n_states), np.nan)
     labels: list[str | float] = []
 
     for i in range(values.size):
-        # Refit on everything strictly before today, at the chosen cadence.
-        if i >= warmup and (not calibrated or i % recalibrate_every == 0):
-            if model.calibrate(values[:i]):
-                calibrated = True
+        if i >= warmup and (params is None or i % recalibrate_every == 0):
+            fitted = fit_hmm(values[:i], n_states=n_states)
+            if fitted is not None:
+                params = fitted
+                belief = np.exp(params.log_pi) if not np.isfinite(beliefs[i - 1]).all() else belief
 
-        if not calibrated:
+        if params is None:
             labels.append(np.nan)
             continue
 
-        belief = model.step(values[i])
+        belief = filter_step(belief, values[i], params)
         beliefs[i] = belief
         labels.append(STATE_LABELS[int(np.argmax(belief))])
 
-    label_series = pd.Series(labels, index=index, dtype="object", name="markov_vol")
-    belief_frame = pd.DataFrame(beliefs, index=index, columns=list(STATE_LABELS))
-    return label_series, belief_frame
+    return (
+        pd.Series(labels, index=index, dtype="object", name="markov_vol"),
+        pd.DataFrame(beliefs, index=index, columns=list(STATE_LABELS[:n_states])),
+    )
 
 
 def markov_vol_regime(pit: pd.DataFrame) -> pd.Series:
     """Registry-compatible wrapper returning labels only."""
-    labels, _ = markov_regime(pit)
-    return labels
+    return markov_regime(pit)[0]

@@ -79,9 +79,10 @@ FAMILY_DESCRIPTIONS: dict[str, str] = {
     "markov_vol": (
         "The only regime here that is learned rather than declared. A three-state "
         "Markov-switching filter estimates where the volatility regimes actually "
-        "sit and carries a probability across them, refitting on expanding "
-        "history so a 1985 label never depends on 2008. Ported from QuantGuild's "
-        "regime-switching lectures; see gradea_backtest/markov.py."
+        "sit and carries a probability across them, refitting on trailing "
+        "history so a 1985 label never depends on 2008. A Gaussian HMM fitted by "
+        "Baum-Welch and used for filtered inference only; see "
+        "gradea_backtest/markov.py."
     ),
 }
 
