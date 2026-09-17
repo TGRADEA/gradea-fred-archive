@@ -61,78 +61,65 @@ assuming them. The two that matter most:
   which inverts the sign of the trade's carry and turns a hard trade into a free
   one.
 
-## Ported from QuantGuild
+## Provenance and licensing
 
-Two modules come from Roman Paolucci's QuantGuild material
-(github.com/romanmichaelpaolucci). That corpus is options- and equity-focused
-teaching code — Black-Scholes, Greeks, stochastic processes, portfolio
-construction — and most of it has no counterpart in a rates-and-credit panel
-built on five FRED series. Two things did, and both closed a real gap here.
+Roman Paolucci's QuantGuild material (github.com/romanmichaelpaolucci) is used
+here the way the GradeA knowledge base records: **as a source of testable
+hypotheses and mathematics, not as a source of code.**
+
+That distinction is a licensing requirement, not a style preference. Six of the
+repositories carry MIT — `Q-Fin`, `Algorithmic_Delta_Hedging`,
+`Algorithmic_Portfolio_Hedging`, `Automatic_Portfolio_Optimization`,
+`Dynamic_Algorithmic_Trading_Systems`, `Genetic_Neural_Network` — and may be used
+in source form with attribution. **`Quant-Guild-Library` and `GaussianCookbook`
+carry no licence at all**, which under default copyright means all rights
+reserved. Attribution is not permission, and this repository is public.
+
+An earlier revision of `markov.py` adapted the `MarkovRegime` class from
+`Quant-Guild-Library`, which was a licensing error. It has been replaced by an
+independent implementation from the primary literature; nothing specific to that
+code remains.
 
 ### `markov.py` — learned volatility regimes
 
-A port of the `MarkovRegime` class from the "Markov Chain Regime Switching Bot"
-lectures: three hidden states, Gaussian emissions, a sticky transition matrix,
-and Bayesian forward filtering. It is the only regime family in this package
-that is *learned* rather than declared — every other one encodes a threshold
-someone chose.
+A three-state Gaussian hidden Markov model over log volatility, fitted by
+Baum-Welch and used for filtered inference only. Implemented from Rabiner (1989,
+Proc. IEEE 77(2)) for the recursions and re-estimation, Hamilton (1989,
+Econometrica 57(2)) for the Markov-switching formulation and the filtered
+probability object, and Dempster, Laird & Rubin (1977) for the EM framework.
 
-Three adaptations were needed:
+It is the only regime family here that is *learned* rather than declared — every
+other one encodes a threshold someone chose.
 
-| | Original | Here | Why |
-|---|---|---|---|
-| Observation | intraday `(high-low)/close` from IB bars | absolute daily change in the 10y yield | the archive is daily |
-| Calibration | once, on a block of history | refit every 252 days on expanding history | fitting once over a backtest sample puts 2008's volatility into 1985's labels |
-| Inference | forward filter | forward filter, unchanged | Baum-Welch or Viterbi over the whole series would label beautifully and be untradeable |
+Three design points carry the weight:
 
-The second is the load-bearing one. The original calibrates once and then runs
-live, which is correct for a live bot — everything it was fitted on really is in
-its past. The same code pointed at history is a lookahead.
+**Fitting and inference are different operations.** Baum-Welch runs
+forward-backward over a training window that lies entirely in the past, which is
+ordinary in-sample estimation. Inference for day *t* uses the forward recursion
+alone. The smoothed state probabilities are never used as labels — they
+incorporate observations after *t*, so a strategy conditioned on them is
+untradeable however good its backtest looks. The GradeA review of this lecture
+material flagged the same hazard independently.
 
-The learned states separate cleanly: mean daily 10y moves of 1.4bp, 2.6bp and
-7.8bp, and the filter independently flags March 1980, October 2008, March 2020
-and September 2022 as high-volatility without being told those dates matter.
+**The observation is a five-day RMS, not a single day's move.** A single absolute
+change is a one-observation estimate of a scale parameter. It also walks into a
+censoring trap: DGS10 is quoted to the basis point, so 11.8% of days print an
+unchanged yield, and in log space that censoring is fatal. Collapsing those days
+onto one value puts 11.8% of the sample on a single observation and the mixture
+spends a whole state on the spike; spreading them across the censored interval
+replaces the spike with an unbounded left tail and a state fits *that*. Both
+attempts produced a low state describing the quotation grid rather than the
+market, pushing 68–74% of the sample into the high state. A five-day RMS reaches
+the floor on 0.4% of days.
 
-### `significance.py` — is it skill, or the best of eleven coin flips?
+**Estimation is rolling, capped at five years.** One parameter set across six
+decades would assume the volatility process is stationary through the Volcker
+disinflation, the Greenspan era and ZIRP. Every observation used still lies
+strictly in the past.
 
-The QuantGuild corpus returns to this question in a dozen lectures. It was also
-the largest hole here: this package reported a Sharpe ratio for each strategy and
-let the reader assume the best one meant something.
-
-It mostly does not. Deflating for multiple testing (Bailey & López de Prado)
-against the nine genuinely searched strategies, the null's expected best Sharpe
-is **0.45** — and only `nfci_duration`, at 0.65 with a deflated Sharpe of 0.93,
-comes close to clearing it. Everything else is indistinguishable from a lucky
-search.
-
-Implemented: Probabilistic and Deflated Sharpe ratios, minimum track record
-length, and a stationary block bootstrap (Politis & Romano) whose resamples keep
-the autocorrelation of daily returns intact. PSR is verified calibrated against a
-true null — uniform on [0,1], 4.3% false positives at the 95% threshold.
-
-One methodological choice worth stating: **benchmarks are excluded from the trial
-count.** Nobody searched for "own the 2-year note"; it is what the search is
-measured against. Including the baselines moves the null's expected best from
-0.45 to 1.09, because deflation scales with the spread of trial Sharpes and an
-unlevered 2y position scoring 2.2 against a zero cash rate widens that spread
-enormously. That would bury every real result under an artefact of how the
-benchmark is financed.
-
-## Crisis windows
-
-`metrics.CRISIS_WINDOWS` and the dashboard's "When it mattered" panel come from
-QuantConnect Lean's Report module, catalogued as Tier 2 prior art in the GradeA
-Competitive Intel review ("named crisis-event windows as comparison panels...
-with a drawdown collection rendered as its own report section"). Each strategy is
-compared against buy-and-hold duration across ten fixed historical episodes,
-chosen from the record rather than from any strategy's returns.
-
-It earns its place because a full-sample Sharpe says nothing about whether the
-position was right on the days that decided a decade. `nfci_duration` beats the
-benchmark through Volcker, Black Monday, the GFC, the taper tantrum and the 2022
-inflation shock, and gives up 29 points through the dot-com bond rally — a
-coherent profile (a crisis hedge that costs you upside in a slow bull market)
-that the headline Sharpe of 0.65 does not show.
+Result: states at 2.8bp, 4.2bp and 6.3bp mean daily 10y move, roughly 30/35/35 by
+share. All four of Volcker 1980, October 2008, March 2020 and September 2022
+classify as high volatility; 2017 comes back predominantly low.
 
 ### `volforecast.py` — the MCS + DM benchmark
 
