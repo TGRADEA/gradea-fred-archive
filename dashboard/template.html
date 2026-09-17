@@ -1,3 +1,8 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Regime Desk</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -157,7 +162,7 @@ td.num,th.num{font-family:"IBM Plex Mono",Menlo,monospace; font-variant-numeric:
 }
 .verdict{
   display:inline-flex; align-items:center; gap:6px; font-size:12px; font-weight:500;
-  padding:3px 10px; border-radius:20px; border:1px solid; white-space:nowrap;
+  padding:3px 10px; border-radius:20px; border:1px solid; max-width:100%;
 }
 .verdict .dot{width:7px; height:7px; border-radius:50%; flex:none}
 .v-strong{color:var(--pos); border-color:var(--pos); background:var(--accent-soft)}
@@ -197,6 +202,8 @@ td.num,th.num{font-family:"IBM Plex Mono",Menlo,monospace; font-variant-numeric:
 .foot{margin-top:26px; font-size:12px; color:var(--ink-3); display:flex; gap:14px; flex-wrap:wrap}
 @media (prefers-reduced-motion: reduce){*{transition:none!important; animation:none!important}}
 </style>
+</head>
+<body>
 
 <header class="top">
   <div class="top-in">
@@ -967,3 +974,5 @@ init();
 window.addEventListener("resize",()=>render());
 })();
 </script>
+</body>
+</html>
