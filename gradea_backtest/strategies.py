@@ -421,15 +421,17 @@ register(Strategy(
         ParamSpec("high", "Weight in high-vol regime", 0.2, 0.0, 2.0, 0.1),
     ],
     caveat=(
-        "The weights were set by the shape of the idea (less size when it is "
-        "rougher), not fitted. Fitting them on this sample would make the "
-        "deflated Sharpe meaningless, since the deflation counts strategies, not "
-        "the parameter settings tried within them. Note the turnover: switching "
-        "on the hard argmax label makes this resize roughly 65 times a year and "
-        "costs about 100bp annually. Sizing on the filter's belief vector "
-        "instead of its argmax would plainly churn less -- that variant is "
-        "deliberately not swapped in here, because changing the strategy after "
-        "seeing its result is the second search that the deflation cannot see."
+        "Reads better than it should. The weights were set by the shape of the "
+        "idea (less size when it is rougher), not fitted, and the deflated "
+        "Sharpe of 0.98 counts nine searched strategies. It does not count the "
+        "three revisions of the underlying regime model that preceded it: the "
+        "observation and the estimation window were both changed after the "
+        "first version, and although each change was made on diagnostic grounds "
+        "-- a state fitting the quotation grid, 68-74% of the sample in one "
+        "state -- rather than on returns, this strategy's Sharpe moved from "
+        "0.49 to 0.75 across them. The deflation counts strategies, not model "
+        "revisions, so treat 0.98 as an upper bound and the strategy as "
+        "unproven until it clears a window that none of those revisions saw."
     ),
 ))
 

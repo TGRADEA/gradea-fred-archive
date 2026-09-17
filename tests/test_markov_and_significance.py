@@ -1,9 +1,10 @@
-"""Tests for the two modules ported from the QuantGuild corpus.
+"""Tests for the learned regime classifier and the significance layer.
 
 The Markov classifier gets the same treatment as every other regime family: its
 labels must be reproducible from data that existed when they were assigned. That
 matters more here than elsewhere, because a learned classifier has somewhere to
-hide a lookahead that a fixed threshold does not -- the fitted emission means.
+hide a lookahead that a fixed threshold does not -- the fitted emission means,
+and the smoothed state probabilities Baum-Welch produces on the way to them.
 """
 
 from __future__ import annotations
