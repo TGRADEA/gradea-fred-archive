@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FRED Archive</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;1,400&display=swap">
+<style>
+/* Layout: status header, then the irreplaceable OAS window, then a series ledger
+   that drives one full-history chart. Tokens shared with dashboard/template.html. */
+:root{
+  color-scheme: light;
+  --ground:#f2f4f7; --surface:#ffffff; --surface-2:#f7f8fa; --surface-sunk:#eceff4;
+  --line:#dde2ea; --line-strong:#c3cbd8;
+  --ink:#10151d; --ink-2:#4a5566; --ink-3:#6c788e;
+  --accent:#2a78d6; --accent-soft:#e7f0fc;
+  --only:#eb6834; --only-soft:#fdeee6;
+  --ok:#1a8f64; --ok-soft:#e3f5ee;
+  --bad:#d13b3a; --bad-soft:#fbe7e7;
+  --warn-bg:#fdf3e3; --warn-line:#e8c98a; --warn-ink:#7a5510;
+  --grid:#e6eaf1;
+  --shadow:0 1px 2px rgba(16,21,29,.05), 0 8px 24px -12px rgba(16,21,29,.14);
+  --f-sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-serif:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --ground:#0d1014; --surface:#161a21; --surface-2:#1b2029; --surface-sunk:#11151b;
+    --line:#2a313c; --line-strong:#3a434f;
+    --ink:#f2f5f9; --ink-2:#aab4c4; --ink-3:#8590a5;
+    --accent:#4b93ea; --accent-soft:#16243a;
+    --only:#ee7a49; --only-soft:#2e1d14;
+    --ok:#3cbf8c; --ok-soft:#12271f;
+    --bad:#ef6b6a; --bad-soft:#2e1617;
+    --warn-bg:#241d0e; --warn-line:#5c4a1e; --warn-ink:#e0bd74;
+    --grid:#232935;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --ground:#0d1014; --surface:#161a21; --surface-2:#1b2029; --surface-sunk:#11151b;
+  --line:#2a313c; --line-strong:#3a434f;
+  --ink:#f2f5f9; --ink-2:#aab4c4; --ink-3:#8590a5;
+  --accent:#4b93ea; --accent-soft:#16243a;
+  --only:#ee7a49; --only-soft:#2e1d14;
+  --ok:#3cbf8c; --ok-soft:#12271f;
+  --bad:#ef6b6a; --bad-soft:#2e1617;
+  --warn-bg:#241d0e; --warn-line:#5c4a1e; --warn-ink:#e0bd74;
+  --grid:#232935;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -12px rgba(0,0,0,.7);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--ground); color:var(--ink); margin:0;
+  font-family:var(--f-sans); font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1180px; margin:0 auto; padding-inline:16px; padding-block:28px 64px; display:grid; gap:20px}
+h1,h2,h3{text-wrap:balance; margin:0}
+p{margin:0}
+.mono,.num{font-family:var(--f-mono); font-variant-numeric:tabular-nums}
+.eyebrow{font:500 11px/1.3 var(--f-mono); letter-spacing:.08em; text-transform:uppercase; color:var(--ink-3)}
+button{font:inherit; color:inherit}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+/* ---------- header ---------- */
+header.top{display:flex; flex-wrap:wrap; gap:16px 32px; align-items:flex-end; justify-content:space-between;
+  padding-bottom:20px; border-bottom:1px solid var(--line)}
+header.top .title{display:grid; gap:8px; min-width:0; max-width:62ch}
+h1{font:600 34px/1.1 var(--f-sans); letter-spacing:-.01em}
+.lede{font:400 16px/1.55 var(--f-serif); color:var(--ink-2)}
+.status{display:grid; gap:6px; justify-items:end; text-align:right}
+.pill{display:inline-flex; align-items:center; gap:7px; padding:4px 11px; border-radius:999px;
+  font:600 12px/1.4 var(--f-mono); border:1px solid transparent; white-space:nowrap}
+.pill::before{content:""; width:7px; height:7px; border-radius:50%; background:currentColor}
+.pill.ok{color:var(--ok); background:var(--ok-soft); border-color:color-mix(in srgb,var(--ok) 30%,transparent)}
+.pill.bad{color:var(--bad); background:var(--bad-soft); border-color:color-mix(in srgb,var(--bad) 30%,transparent)}
+.pill.warn{color:var(--warn-ink); background:var(--warn-bg); border-color:var(--warn-line)}
+.pill.only{color:var(--only); background:var(--only-soft); border-color:color-mix(in srgb,var(--only) 30%,transparent)}
+.pill.sm{font-size:11px; padding:2px 8px}
+.meta{font:400 12px/1.5 var(--f-mono); color:var(--ink-3)}
+
+/* ---------- panels ---------- */
+.panel{background:var(--surface); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); min-width:0}
+.panel > .hd{display:flex; flex-wrap:wrap; gap:8px 16px; align-items:baseline; justify-content:space-between;
+  padding:16px 18px 0}
+.panel h2{font:600 16px/1.3 var(--f-sans)}
+.panel .sub{font-size:13px; color:var(--ink-2)}
+.panel .bd{padding:14px 18px 18px}
+
+/* ---------- only-copy band ---------- */
+.only-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr)); gap:14px}
+.only-card{display:grid; gap:10px; padding:14px; border:1px solid var(--line); border-radius:8px; background:var(--surface-2); min-width:0}
+.only-card .row1{display:flex; flex-wrap:wrap; gap:6px 12px; align-items:baseline; justify-content:space-between}
+.only-card .sid{font:600 13px var(--f-mono)}
+.only-card .big{font:600 26px/1 var(--f-mono); font-variant-numeric:tabular-nums; color:var(--only)}
+.only-card .big small{font:400 13px var(--f-sans); color:var(--ink-2); margin-left:6px}
+.span-bar{position:relative; height:26px; border-radius:5px; background:var(--surface-sunk); overflow:hidden}
+.span-bar .seg{position:absolute; top:0; bottom:0}
+.span-bar .seg.only{background:var(--only)}
+.span-bar .seg.both{background:var(--accent); opacity:.85}
+.span-legend{display:flex; flex-wrap:wrap; gap:4px 16px; font:400 11px/1.4 var(--f-mono); color:var(--ink-3); justify-content:space-between}
+.key{display:inline-flex; align-items:center; gap:6px}
+.key i{width:10px; height:10px; border-radius:2px; display:inline-block}
+.note{font-size:12.5px; color:var(--ink-2); max-width:80ch}
+
+/* ---------- ledger ---------- */
+.tbl-wrap{overflow-x:auto}
+table{border-collapse:collapse; width:100%; min-width:760px}
+th,td{padding:10px 12px; text-align:left; border-bottom:1px solid var(--line); vertical-align:middle}
+th{font:500 11px/1.3 var(--f-mono); letter-spacing:.06em; text-transform:uppercase; color:var(--ink-3); white-space:nowrap}
+td.r,th.r{text-align:right}
+.nowrap{white-space:nowrap}
+tbody tr{cursor:pointer}
+tbody tr:hover{background:var(--surface-2)}
+tbody tr[aria-selected="true"]{background:var(--accent-soft)}
+tbody tr:last-child td{border-bottom:0}
+.sid-cell{display:grid; gap:1px}
+.sid-cell b{font:600 13px var(--f-mono)}
+.sid-cell span{font-size:12px; color:var(--ink-2)}
+.spark{display:block}
+.delta.up{color:var(--bad)} .delta.down{color:var(--ok)} .delta.flat{color:var(--ink-3)}
+
+/* ---------- chart ---------- */
+.ctrls{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+.seg-btns{display:inline-flex; border:1px solid var(--line-strong); border-radius:7px; overflow:hidden}
+.seg-btns button{background:var(--surface); border:0; padding:5px 11px; font:500 12px var(--f-mono); cursor:pointer; color:var(--ink-2)}
+.seg-btns button + button{border-left:1px solid var(--line-strong)}
+.seg-btns button[aria-pressed="true"]{background:var(--ink); color:var(--surface)}
+.seg-btns button:disabled{opacity:.4; cursor:default}
+select{font:500 12px var(--f-mono); padding:5px 8px; border-radius:7px; border:1px solid var(--line-strong); background:var(--surface); color:var(--ink)}
+.chart-host{position:relative; height:340px; margin-top:6px}
+.chart-host svg{display:block; width:100%; height:100%}
+.chart-host text{font:400 11px var(--f-mono); fill:var(--ink-3)}
+.tip{position:absolute; pointer-events:none; background:var(--surface); border:1px solid var(--line-strong); border-radius:6px;
+  padding:6px 9px; font:500 12px/1.35 var(--f-mono); box-shadow:var(--shadow); white-space:nowrap}
+.tip .d{color:var(--ink-3); font-weight:400; font-size:11px}
+.readout{display:flex; flex-wrap:wrap; gap:6px 22px; font:400 12px var(--f-mono); color:var(--ink-2)}
+.readout b{color:var(--ink); font-weight:600}
+
+/* ---------- detail ---------- */
+.detail{display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr)); gap:20px}
+.detail > div{min-width:0; display:grid; gap:10px; align-content:start}
+.detail h3{font:600 13px var(--f-sans)}
+.obs{width:100%; min-width:0}
+.obs td,.obs th{padding:5px 8px; font-size:12.5px}
+.obs td{font-family:var(--f-mono); font-variant-numeric:tabular-nums}
+.obs tbody tr{cursor:default}
+.obs tbody tr:hover{background:none}
+.kv{display:grid; grid-template-columns:max-content 1fr; gap:6px 14px; font-size:12.5px; margin:0}
+.kv dt{color:var(--ink-3); font-family:var(--f-mono); font-size:11px; text-transform:uppercase; letter-spacing:.05em; padding-top:2px}
+.kv dd{margin:0; font-family:var(--f-mono); overflow-wrap:anywhere}
+.commits{list-style:none; margin:0; padding:0; display:grid; gap:6px; font-size:12.5px}
+.commits li{display:grid; grid-template-columns:max-content max-content 1fr; gap:10px; align-items:baseline}
+.commits code{font:500 12px var(--f-mono); color:var(--accent)}
+.commits .dt{font:400 12px var(--f-mono); color:var(--ink-3)}
+.code{position:relative; background:var(--surface-sunk); border:1px solid var(--line); border-radius:7px; padding:34px 12px 10px;
+  font:400 12px/1.6 var(--f-mono); white-space:pre; overflow-x:auto}
+.copy{position:absolute; top:6px; right:6px; background:var(--surface); border:1px solid var(--line-strong); border-radius:5px;
+  padding:2px 8px; font:500 11px var(--f-mono); cursor:pointer; color:var(--ink-2)}
+
+.foot{display:flex; flex-wrap:wrap; gap:6px 24px; justify-content:space-between; font:400 12px var(--f-mono); color:var(--ink-3)}
+
+@media (max-width:640px){
+  h1{font-size:28px}
+  .status{justify-items:start; text-align:left}
+  .chart-host{height:260px}
+}
+@media (prefers-reduced-motion: reduce){ *{transition:none!important} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="title">
+      <span class="eyebrow">gradea_v4 &middot; FOUNDATION-FRED-MIRROR-1</span>
+      <h1>FRED Archive</h1>
+      <p class="lede">The off-box mirror of the GradeA FRED series archive. FRED serves the two
+        ICE&nbsp;BofA OAS series on a rolling ~3-year window, so once an observation ages out,
+        this repository holds the only copy.</p>
+    </div>
+    <div class="status">
+      <span id="integrity" class="pill"></span>
+      <span id="fresh" class="pill"></span>
+      <span class="meta" id="manifest-meta"></span>
+    </div>
+  </header>
+
+  <section class="panel" aria-labelledby="only-h">
+    <div class="hd">
+      <h2 id="only-h">Held only here</h2>
+      <span class="sub">Observations older than FRED's current OAS window</span>
+    </div>
+    <div class="bd" style="display:grid; gap:12px">
+      <div class="only-grid" id="only"></div>
+      <p class="note">FRED's cut-off is estimated as three years before this page was built; FRED does not
+        publish the exact boundary. Each OAS series accretes about 262 observations a year, and every one of
+        them eventually crosses into the orange segment.</p>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="ledger-h">
+    <div class="hd">
+      <h2 id="ledger-h">Series</h2>
+      <span class="sub">SHA-256 of each CSV checked against <span class="mono">manifest.json</span> at build time. Select a row to chart it.</span>
+    </div>
+    <div class="bd tbl-wrap">
+      <table id="ledger">
+        <thead><tr>
+          <th>Series</th><th>Span</th><th class="r">Obs</th><th class="r">Latest</th>
+          <th class="r">Change</th><th>Last 12 months</th><th>Checksum</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="chart-h">
+    <div class="hd">
+      <div style="display:grid; gap:2px; min-width:0">
+        <h2 id="chart-h"></h2>
+        <span class="sub" id="chart-sub"></span>
+      </div>
+      <div class="ctrls">
+        <label for="pick" class="eyebrow">Series</label>
+        <select id="pick"></select>
+        <div class="seg-btns" id="ranges" role="group" aria-label="Date range"></div>
+      </div>
+    </div>
+    <div class="bd" style="display:grid; gap:10px">
+      <div class="chart-host" id="chart"><div class="tip" id="tip" hidden></div></div>
+      <div class="readout" id="readout"></div>
+    </div>
+  </section>
+
+  <section class="panel" aria-labelledby="detail-h">
+    <div class="hd"><h2 id="detail-h"></h2></div>
+    <div class="bd detail">
+      <div>
+        <h3>Most recent observations</h3>
+        <table class="obs" id="recent"><thead><tr><th>observation_date</th><th class="r">value</th><th class="r">change</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div>
+        <h3>Manifest entry</h3>
+        <dl class="kv" id="kv"></dl>
+        <h3>Revision history</h3>
+        <ul class="commits" id="commits"></ul>
+        <p class="note">FRED revises preliminary values after first publication. Each revision lands here as a diff, so
+          <span class="mono">git log -p &lt;series&gt;.csv</span> is the vintage record.</p>
+      </div>
+      <div>
+        <h3>Restore from this mirror</h3>
+        <div class="code" id="restore"><button class="copy" type="button" data-copy="restore">Copy</button>git clone git@github.com:TGRADEA/gradea_v4.git ~/gradea_v4
+export GRADEA_FRED_MIRROR_PATH="$HOME/gradea_v4"
+cd /path/to/gradea-trading-platform/gradea-backend
+python scripts/mirror_fred.py --verify-all
+python scripts/mirror_fred.py --restore-all</div>
+        <p class="note"><span class="mono">--restore-all</span> refuses to run if verification fails, and refuses to shrink an
+          archive that holds more observations than the mirror. Never force-push this repository: its history is the only
+          record of FRED's revisions.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="foot">
+    <span id="built"></span>
+    <span>Rebuild: python -m gradea_backtest.build_archive</span>
+  </div>
+</div>
+
+<script id="payload" type="application/json">__DATA__</script>
+<script>
+(function(){
+"use strict";
+const D = JSON.parse(document.getElementById("payload").textContent);
+const $ = (id)=>document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const DAY = 864e5;
+const BUILT = Date.parse(D.built_at);
+const WINDOW_START = (()=>{ const d=new Date(BUILT); d.setUTCFullYear(d.getUTCFullYear()-3); return d.toISOString().slice(0,10); })();
+
+const S = D.series.map(s=>({...s, t:s.dates.map(d=>Date.parse(d))}));
+const BY = Object.fromEntries(S.map(s=>[s.id,s]));
+const isPct = (s)=>s.units==="percent";
+const fmtV = (s,v)=> v==null ? "—" : isPct(s) ? v.toFixed(2)+"%" : v.toFixed(3);
+const fmtD = (s,d)=> d==null||!isFinite(d) ? "—" :
+  isPct(s) ? (d>0?"+":d<0?"−":"±")+Math.abs(Math.round(d*100))+" bp" : (d>0?"+":d<0?"−":"±")+Math.abs(d).toFixed(3);
+const dcls = (d)=> !d ? "flat" : d>0 ? "up" : "down";
+const n0 = (x)=>x.toLocaleString("en-US");
+const esc = (x)=>String(x).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+function el(tag,attrs,parent){ const n=document.createElementNS(NS,tag); for(const k in attrs) n.setAttribute(k,attrs[k]); if(parent) parent.appendChild(n); return n; }
+function lowerBound(arr,x){ let lo=0,hi=arr.length; while(lo<hi){const m=(lo+hi)>>1; if(arr[m]<x) lo=m+1; else hi=m;} return lo; }
+
+/* ---------- header ---------- */
+const nOk = S.filter(s=>s.status==="ok").length;
+const integ = $("integrity");
+integ.className = "pill " + (nOk===S.length ? "ok" : "bad");
+integ.textContent = nOk===S.length ? `${nOk}/${S.length} series verified` : `${S.length-nOk} of ${S.length} series FAILED verification`;
+// Staleness: business-daily series should be within a week of the build; NFCI within two.
+const stale = S.filter(s=>s.dates.length && (BUILT-Date.parse(s.dates[s.dates.length-1]))/DAY > (s.frequency==="weekly"?14:7));
+const lastObs = S.reduce((m,s)=>s.dates.length && s.dates[s.dates.length-1]>m ? s.dates[s.dates.length-1] : m, "");
+const fresh = $("fresh");
+if(stale.length){
+  const age = Math.round((BUILT-Date.parse(lastObs))/DAY);
+  fresh.className="pill warn"; fresh.textContent=`Last observation ${lastObs} · ${age} days old`;
+  fresh.title="The daily refresh has not committed new observations recently. OAS history older than FRED's window is lost for good if it is not captured.";
+} else { fresh.className="pill ok"; fresh.textContent=`Current through ${lastObs}`; }
+$("manifest-meta").textContent = `manifest updated ${String(D.manifest_updated_at||"").slice(0,16).replace("T"," ")} UTC`;
+$("built").textContent = `Built ${D.built_at.replace("T"," ").replace("Z"," UTC")} · ${n0(S.reduce((a,s)=>a+s.dates.length,0))} observations across ${S.length} series`;
+
+/* ---------- held only here ---------- */
+$("only").innerHTML = S.filter(s=>s.windowed).map(s=>{
+  const first=s.t[0], last=s.t[s.t.length-1], w=Date.parse(WINDOW_START);
+  const nOnly = lowerBound(s.dates, WINDOW_START);
+  const span=last-first||1, onlyFrac=Math.max(0,Math.min(1,(w-first)/span));
+  return `<div class="only-card">
+    <div class="row1"><span class="sid">${esc(s.id)}</span><span class="pill only sm">only copy</span></div>
+    <div class="big">${n0(nOnly)}<small>of ${n0(s.dates.length)} observations</small></div>
+    <div class="span-bar" role="img" aria-label="${n0(nOnly)} observations before ${WINDOW_START} exist only in this archive">
+      <div class="seg only" style="left:0;width:${(onlyFrac*100).toFixed(2)}%"></div>
+      <div class="seg both" style="left:${(onlyFrac*100).toFixed(2)}%;right:0"></div>
+    </div>
+    <div class="span-legend">
+      <span>${s.dates[0]}</span>
+      <span class="key"><i style="background:var(--only)"></i>archive only</span>
+      <span class="key"><i style="background:var(--accent)"></i>still on FRED (from ~${WINDOW_START})</span>
+      <span>${s.dates[s.dates.length-1]}</span>
+    </div>
+    <span class="note">${esc(s.label)}</span>
+  </div>`;
+}).join("");
+
+/* ---------- sparkline ---------- */
+function spark(s){
+  const W=150,H=30, from=s.t[s.t.length-1]-365*DAY, i0=lowerBound(s.t,from);
+  const xs=s.t.slice(i0), ys=s.values.slice(i0);
+  if(xs.length<2) return "";
+  const lo=Math.min(...ys), hi=Math.max(...ys), r=hi-lo||1;
+  const X=t=>((t-xs[0])/(xs[xs.length-1]-xs[0]))*(W-6)+3, Y=v=>H-3-((v-lo)/r)*(H-6);
+  let d=""; for(let i=0;i<xs.length;i++) d+=(i?"L":"M")+X(xs[i]).toFixed(1)+" "+Y(ys[i]).toFixed(1);
+  const ex=X(xs[xs.length-1]), ey=Y(ys[ys.length-1]);
+  return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true">
+    <path d="${d}L${ex.toFixed(1)} ${H}L3 ${H}Z" fill="var(--accent-soft)" stroke="none"/>
+    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.4"/>
+    <circle cx="${ex}" cy="${ey}" r="2.6" fill="var(--accent)"/></svg>`;
+}
+
+/* ---------- ledger ---------- */
+const state = {id: S[0].id, range: "3Y"};
+try{ const r=localStorage.getItem("fred-archive-range"); if(r) state.range=r; }catch(e){}
+function renderLedger(){
+  $("ledger").querySelector("tbody").innerHTML = S.map(s=>{
+    const n=s.values.length, last=s.values[n-1], prev=s.values[n-2];
+    const chk = s.status==="ok" ? `<span class="pill ok sm" title="${esc(s.sha256)}">ok · ${s.sha256.slice(0,10)}</span>`
+      : s.status==="missing" ? `<span class="pill bad sm">CSV missing</span>`
+      : `<span class="pill bad sm" title="expected ${esc(s.manifest.sha256)}">mismatch</span>`;
+    return `<tr data-id="${esc(s.id)}" tabindex="0" aria-selected="${s.id===state.id}">
+      <td><div class="sid-cell"><b>${esc(s.id)}${s.windowed?' <span class="pill only sm">only copy</span>':""}</b><span>${esc(s.label)}</span></div></td>
+      <td class="mono nowrap">${s.dates[0]||"—"} → ${s.dates[n-1]||"—"}</td>
+      <td class="r num">${n0(n)}</td>
+      <td class="r num">${fmtV(s,last)}</td>
+      <td class="r num delta ${dcls(last-prev)}">${fmtD(s,last-prev)}</td>
+      <td>${spark(s)}</td>
+      <td>${chk}</td></tr>`;
+  }).join("");
+}
+$("ledger").addEventListener("click",e=>{ const tr=e.target.closest("tr[data-id]"); if(tr) select(tr.dataset.id); });
+$("ledger").addEventListener("keydown",e=>{ const tr=e.target.closest("tr[data-id]"); if(tr&&(e.key==="Enter"||e.key===" ")){ e.preventDefault(); select(tr.dataset.id);} });
+
+/* ---------- chart ---------- */
+const RANGES=[["1Y",365],["3Y",1096],["10Y",3653],["Max",Infinity]];
+$("pick").innerHTML = S.map(s=>`<option value="${esc(s.id)}">${esc(s.id)}</option>`).join("");
+$("pick").addEventListener("change",e=>select(e.target.value));
+$("ranges").innerHTML = RANGES.map(([k])=>`<button type="button" data-r="${k}">${k}</button>`).join("");
+$("ranges").addEventListener("click",e=>{ const b=e.target.closest("button[data-r]"); if(!b||b.disabled) return;
+  state.range=b.dataset.r; try{localStorage.setItem("fred-archive-range",state.range);}catch(err){} renderChart(); });
+
+function niceTicks(lo,hi,n){
+  const span=hi-lo||1, step0=span/n, mag=Math.pow(10,Math.floor(Math.log10(step0)));
+  const step=[1,2,2.5,5,10].map(m=>m*mag).find(s=>s>=step0);
+  const out=[]; for(let v=Math.ceil(lo/step)*step; v<=hi+1e-9; v+=step) out.push(+v.toFixed(10));
+  out.digits=Math.max(0,-Math.floor(Math.log10(step)+1e-9)+(step/mag===2.5?1:0));
+  return out;
+}
+let view=null;
+function renderChart(){
+  const s=BY[state.id], host=$("chart");
+  const full = s.t.length ? s.t[s.t.length-1]-s.t[0] : 0;
+  [...$("ranges").children].forEach(b=>{
+    const days=RANGES.find(r=>r[0]===b.dataset.r)[1];
+    b.disabled = isFinite(days) && days*DAY > full*1.15 && b.dataset.r!=="1Y";
+    b.setAttribute("aria-pressed", b.dataset.r===state.range);
+  });
+  let days=RANGES.find(r=>r[0]===state.range)[1];
+  if(isFinite(days) && days*DAY > full*1.15 && state.range!=="1Y") days=Infinity;
+  const tEnd=s.t[s.t.length-1], i0 = isFinite(days) ? lowerBound(s.t, tEnd-days*DAY) : 0;
+  const xs=s.t.slice(i0), ys=s.values.slice(i0);
+
+  host.querySelectorAll("svg").forEach(n=>n.remove());
+  const W=host.clientWidth, H=host.clientHeight, m={l:46,r:14,t:10,b:26};
+  const svg=el("svg",{viewBox:`0 0 ${W} ${H}`,role:"img","aria-label":`${s.id} from ${s.dates[i0]} to ${s.dates[s.dates.length-1]}`});
+  host.insertBefore(svg, $("tip"));
+  let lo=Math.min(...ys), hi=Math.max(...ys); const pad=(hi-lo||1)*.06; lo-=pad; hi+=pad;
+  const x0=xs[0], x1=xs[xs.length-1]||x0+1;
+  const X=t=>m.l+((t-x0)/(x1-x0||1))*(W-m.l-m.r), Y=v=>m.t+(1-(v-lo)/(hi-lo))*(H-m.t-m.b);
+
+  // Archive-only zone for windowed series.
+  if(s.windowed){
+    const w=Date.parse(WINDOW_START);
+    if(w>x0){ const xw=X(Math.min(w,x1));
+      el("rect",{x:m.l,y:m.t,width:Math.max(0,xw-m.l),height:H-m.t-m.b,fill:"var(--only-soft)"},svg);
+      const lbl=el("text",{x:m.l+6,y:m.t+14,fill:"var(--only)"},svg); lbl.textContent="archive only";
+      el("line",{x1:xw,x2:xw,y1:m.t,y2:H-m.b,stroke:"var(--only)","stroke-dasharray":"3 3"},svg);
+    }
+  }
+  const ticks=niceTicks(lo,hi,5);
+  for(const v of ticks){
+    const y=Y(v); el("line",{x1:m.l,x2:W-m.r,y1:y,y2:y,stroke:"var(--grid)"},svg);
+    const t=el("text",{x:m.l-6,y:y+4,"text-anchor":"end"},svg); t.textContent = v.toFixed(ticks.digits);
+  }
+  if(lo<0&&hi>0){ el("line",{x1:m.l,x2:W-m.r,y1:Y(0),y2:Y(0),stroke:"var(--line-strong)"},svg); }
+  // Year ticks.
+  const y0=new Date(x0).getUTCFullYear(), y1=new Date(x1).getUTCFullYear(), ny=y1-y0+1;
+  const every = ny<=4?1: ny<=8?2: ny<=20?5: 10;
+  const quarter = ny<=2;
+  for(let y=y0; y<=y1+1; y++){
+    const months = quarter ? [0,3,6,9] : [0];
+    for(const mo of months){
+      if(!quarter && y%every) continue;
+      const t=Date.UTC(y,mo,1); if(t<x0||t>x1) continue;
+      const x=X(t); el("line",{x1:x,x2:x,y1:H-m.b,y2:H-m.b+4,stroke:"var(--line-strong)"},svg);
+      const lb=el("text",{x:x,y:H-m.b+16,"text-anchor":"middle"},svg);
+      lb.textContent = quarter ? (mo===0? String(y) : ["","","","Apr","","","Jul","","","Oct"][mo]) : String(y);
+    }
+  }
+  // Min/max per pixel column keeps spikes visible on 16k-point series.
+  const cols=Math.max(1,Math.floor(W-m.l-m.r)); let d="";
+  if(xs.length>cols*2){
+    let c=-1,mn=0,mx=0,first=true;
+    const flush=()=>{ const x=(m.l+c+.5).toFixed(1); d+=(first?"M":"L")+x+" "+Y(mx).toFixed(1)+"L"+x+" "+Y(mn).toFixed(1); first=false; };
+    for(let i=0;i<xs.length;i++){ const ci=Math.min(cols-1,Math.floor(X(xs[i])-m.l));
+      if(ci!==c){ if(c>=0) flush(); c=ci; mn=mx=ys[i]; } else { if(ys[i]<mn) mn=ys[i]; if(ys[i]>mx) mx=ys[i]; } }
+    flush();
+  } else { for(let i=0;i<xs.length;i++) d+=(i?"L":"M")+X(xs[i]).toFixed(1)+" "+Y(ys[i]).toFixed(1); }
+  el("path",{d:d+`L${X(x1).toFixed(1)} ${H-m.b}L${m.l} ${H-m.b}Z`,fill:"var(--accent-soft)",stroke:"none",opacity:".8"},svg);
+  el("path",{d,fill:"none",stroke:"var(--accent)","stroke-width":"1.5","stroke-linejoin":"round"},svg);
+  el("circle",{cx:X(x1),cy:Y(ys[ys.length-1]),r:3.5,fill:"var(--accent)",stroke:"var(--surface)","stroke-width":"1.5"},svg);
+  const cross=el("line",{y1:m.t,y2:H-m.b,stroke:"var(--ink-3)","stroke-width":"1",visibility:"hidden"},svg);
+  const dot=el("circle",{r:3.5,fill:"var(--surface)",stroke:"var(--accent)","stroke-width":"2",visibility:"hidden"},svg);
+  view={s,xs,ys,X,Y,m,W,H,i0,cross,dot};
+
+  $("chart-h").textContent = s.label;
+  $("chart-sub").textContent = `${s.id} · ${s.units} · ${s.frequency} · ${s.dates[i0]} → ${s.dates[s.dates.length-1]}`;
+  const ilo=ys.indexOf(Math.min(...ys)), ihi=ys.indexOf(Math.max(...ys));
+  $("readout").innerHTML = `<span>Latest <b>${fmtV(s,ys[ys.length-1])}</b> on ${s.dates[s.dates.length-1]}</span>
+    <span>Range low <b>${fmtV(s,ys[ilo])}</b> on ${s.dates[i0+ilo]}</span>
+    <span>Range high <b>${fmtV(s,ys[ihi])}</b> on ${s.dates[i0+ihi]}</span>
+    <span>Change over range <b>${fmtD(s,ys[ys.length-1]-ys[0])}</b></span>
+    <span><b>${n0(xs.length)}</b> observations shown</span>`;
+}
+function hover(e){
+  if(!view) return; const {s,xs,ys,X,Y,m,W,i0,cross,dot}=view;
+  const r=$("chart").getBoundingClientRect(), px=e.clientX-r.left;
+  if(px<m.l||px>W-m.r){ leave(); return; }
+  const t=xs[0]+((px-m.l)/(W-m.l-m.r))*(xs[xs.length-1]-xs[0]);
+  let i=lowerBound(xs,t); if(i>=xs.length) i=xs.length-1; if(i>0 && t-xs[i-1]<xs[i]-t) i--;
+  const x=X(xs[i]), y=Y(ys[i]);
+  cross.setAttribute("x1",x); cross.setAttribute("x2",x); cross.setAttribute("visibility","visible");
+  dot.setAttribute("cx",x); dot.setAttribute("cy",y); dot.setAttribute("visibility","visible");
+  const tip=$("tip"); tip.hidden=false;
+  tip.innerHTML=`<div class="d">${s.dates[i0+i]}</div>${fmtV(s,ys[i])}`;
+  const tw=tip.offsetWidth; tip.style.left=Math.min(Math.max(0,x+10), W-tw)+"px"; tip.style.top=Math.max(0,y-44)+"px";
+}
+function leave(){ if(!view) return; view.cross.setAttribute("visibility","hidden"); view.dot.setAttribute("visibility","hidden"); $("tip").hidden=true; }
+$("chart").addEventListener("pointermove",hover);
+$("chart").addEventListener("pointerleave",leave);
+let rz; window.addEventListener("resize",()=>{ clearTimeout(rz); rz=setTimeout(renderChart,120); });
+
+/* ---------- detail ---------- */
+function renderDetail(){
+  const s=BY[state.id], n=s.values.length;
+  $("detail-h").textContent = `${s.id} detail`;
+  let rows=""; for(let i=n-1;i>=Math.max(0,n-12);i--){ const dv=i>0?s.values[i]-s.values[i-1]:null;
+    rows+=`<tr><td>${s.dates[i]}</td><td class="r">${fmtV(s,s.values[i])}</td><td class="r delta ${dcls(dv)}">${i>0?fmtD(s,dv):"—"}</td></tr>`; }
+  $("recent").querySelector("tbody").innerHTML = rows;
+  const mf=s.manifest;
+  $("kv").innerHTML = [
+    ["file", `${s.id}.csv`], ["obs_count", n0(mf.obs_count)], ["span", `${mf.first_date} → ${mf.last_date}`],
+    ["bytes", n0(mf.bytes)], ["sha256", mf.sha256], ["exported", String(mf.exported_at).slice(0,19).replace("T"," ")+" UTC"],
+    ["checked", s.status==="ok" ? "matches file on disk" : s.status==="missing" ? "CSV missing" : `MISMATCH — file is ${s.sha256}`],
+  ].map(([k,v])=>`<dt>${k}</dt><dd>${esc(v)}</dd>`).join("");
+  $("commits").innerHTML = s.history.length
+    ? s.history.slice(0,8).map(c=>`<li><code>${esc(c.sha)}</code><span class="dt">${esc(c.date)}</span><span>${esc(c.subject)}</span></li>`).join("")
+      + (s.history.length>8?`<li><span></span><span></span><span class="dt">+${s.history.length-8} earlier</span></li>`:"")
+    : `<li><span class="dt">No git history available at build time.</span></li>`;
+}
+
+function select(id){
+  state.id=id; $("pick").value=id;
+  document.querySelectorAll("#ledger tbody tr").forEach(tr=>tr.setAttribute("aria-selected", tr.dataset.id===id));
+  renderChart(); renderDetail();
+}
+
+document.querySelectorAll("button.copy").forEach(b=>b.addEventListener("click",()=>{
+  const box=$(b.dataset.copy), text=[...box.childNodes].filter(n=>n!==b).map(n=>n.textContent).join("").trim();
+  const done=()=>{ b.textContent="Copied"; setTimeout(()=>b.textContent="Copy",1400); };
+  const fallback=()=>{ const r=document.createRange(); r.selectNodeContents(box); const sel=getSelection(); sel.removeAllRanges(); sel.addRange(r); b.textContent="Press ⌘C"; };
+  try{ navigator.clipboard.writeText(text).then(done,fallback); }catch(e){ fallback(); }
+}));
+
+renderLedger();
+select(state.id);
+})();
+</script>
+</body>
+</html>

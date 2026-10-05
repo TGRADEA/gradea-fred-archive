@@ -40,6 +40,19 @@ observation_date,value
 Dates are ISO and strictly ascending. There are no gaps encoded as `.` and no
 null values — FRED's no-observation rows are dropped at the network boundary.
 
+## Archive page
+
+```bash
+python -m gradea_backtest.build_archive    # writes archive/fred-archive.html
+```
+
+A self-contained status page for the mirror: each series' span, latest value
+and full-history chart, a SHA-256 check of every CSV against `manifest.json`,
+a staleness warning when the daily refresh stops committing, and a count of OAS
+observations that have aged out of FRED's window and now exist only here. It
+uses only the standard library and exits non-zero if any checksum fails. The
+output is gitignored; `archive/template.html` is the source.
+
 ## Restoring
 
 ```bash

@@ -8,6 +8,7 @@ __pycache__/
 # locally; the template beside it is the source.
 dashboard/data.json
 dashboard/regime-desk.html
+archive/fred-archive.html
 
 # backend/ — secrets, local state, and the snapshot store (mirrored to
 # Supabase by backend/chain_snapshot_mirror.py; never committed).
